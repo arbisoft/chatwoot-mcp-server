@@ -91,17 +91,20 @@ def compact_conversation(raw: dict[str, Any], text_limit: int) -> dict[str, Any]
         "contact": person(meta.get("sender"), "id", "name", "email", "phone_number"),
         "assignee": person(meta.get("assignee"), "id", "name", "email"),
         "team": person(meta.get("team"), "id", "name"),
+        "custom_attributes": attribute_values(raw.get("custom_attributes")),
         "last_message": compact_message(last, text_limit) if isinstance(last, dict) else None,
     }
 
 
-def _attribute_value(value: Any) -> Any:
-    # The website widget lets visitors set their own custom attributes, so text values are untrusted.
-    return wrap_untrusted(value, _ATTRIBUTE_VALUE_LIMIT) if isinstance(value, str) else value
+def attribute_values(raw: Any) -> dict[str, Any]:
+    """Custom attributes of a chat or customer. The website widget lets visitors set these, so text is untrusted."""
+    return {
+        key: wrap_untrusted(value, _ATTRIBUTE_VALUE_LIMIT) if isinstance(value, str) else value
+        for key, value in (raw or {}).items()
+    }
 
 
 def compact_contact(raw: dict[str, Any]) -> dict[str, Any]:
-    custom = raw.get("custom_attributes") or {}
     return {
         "id": raw.get("id"),
         "name": raw.get("name"),
@@ -111,5 +114,21 @@ def compact_contact(raw: dict[str, Any]) -> dict[str, Any]:
         "blocked": raw.get("blocked"),
         "created_at": raw.get("created_at"),
         "last_activity_at": raw.get("last_activity_at"),
-        "custom_attributes": {k: _attribute_value(v) for k, v in custom.items()},
+        "custom_attributes": attribute_values(raw.get("custom_attributes")),
     }
+
+
+def compact_note(raw: dict[str, Any], text_limit: int) -> dict[str, Any]:
+    content = raw.get("content")
+    return {
+        "id": raw.get("id"),
+        "content": content[:text_limit] if isinstance(content, str) else content,
+        "author": person(raw.get("user"), "id", "name"),
+        "created_at": raw.get("created_at"),
+    }
+
+
+def macro_steps(actions: Any) -> list[dict[str, Any]]:
+    return [
+        {"step": a.get("action_name"), "with": a.get("action_params")} for a in actions or [] if isinstance(a, dict)
+    ]

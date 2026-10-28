@@ -28,8 +28,20 @@ READ_TOOLS = {
     "get_report_by_group",
     "get_first_response_distribution",
     "get_account",
+    "filter_conversations",
+    "list_conversation_attachments",
+    "get_contact_notes",
+    "search_help_articles",
+    "list_macros",
+    "list_csat_responses",
 }
-WRITE_TOOLS = {"add_private_note", "add_conversation_labels", "add_contact_labels"}
+WRITE_TOOLS = {
+    "add_private_note",
+    "add_conversation_labels",
+    "add_contact_labels",
+    "add_contact_note",
+    "remove_conversation_labels",
+}
 ACTION_TOOLS = {
     "send_reply",
     "assign_conversation",
@@ -38,6 +50,8 @@ ACTION_TOOLS = {
     "create_conversation",
     "create_contact",
     "update_contact",
+    "set_conversation_custom_attributes",
+    "run_macro",
 }
 
 
@@ -49,15 +63,15 @@ async def test_the_write_tools_exist_only_when_switched_on(make_client):
     assert await tool_names(make_client(CHATWOOT_MCP_ENABLE_WRITES="true")) == READ_TOOLS | WRITE_TOOLS
 
 
-async def test_with_both_switches_on_all_thirty_four_tools_exist(make_client):
+async def test_with_both_switches_on_all_forty_four_tools_exist(make_client):
     names = await tool_names(make_client(CHATWOOT_MCP_ENABLE_WRITES="true", CHATWOOT_MCP_ENABLE_ACTIONS="true"))
-    assert names == READ_TOOLS | WRITE_TOOLS | ACTION_TOOLS and len(names) == 34
+    assert names == READ_TOOLS | WRITE_TOOLS | ACTION_TOOLS and len(names) == 44
 
 
 async def test_every_tool_has_all_four_hints_and_a_tier_and_module_tag(make_client):
     async with make_client(CHATWOOT_MCP_ENABLE_WRITES="true", CHATWOOT_MCP_ENABLE_ACTIONS="true") as client:
         tools = await client.list_tools()
-    assert len(tools) == 34
+    assert len(tools) == 44
     for tool in tools:
         hints = tool.annotations
         assert None not in (hints.readOnlyHint, hints.destructiveHint, hints.idempotentHint, hints.openWorldHint), (
@@ -88,5 +102,5 @@ async def test_the_server_can_be_built_twice_without_sharing_state(chatwoot, mak
     a = build_server(make_settings(), token_getter=lambda: "a", transport=httpx.MockTransport(chatwoot))
     b = build_server(make_settings(CHATWOOT_MCP_ENABLE_WRITES="true"), token_getter=lambda: "b")
     async with Client(a) as ca, Client(b) as cb:
-        assert len(await ca.list_tools()) == 24
-        assert len(await cb.list_tools()) == 27
+        assert len(await ca.list_tools()) == 30
+        assert len(await cb.list_tools()) == 35

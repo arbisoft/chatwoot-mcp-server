@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server that lets an 
 
 It is a small [FastMCP v3](https://gofastmcp.com) program that sits next to Chatwoot and calls Chatwoot's existing HTTP API. **Chatwoot itself is not changed.** Every call is made with the caller's own Chatwoot key, so Chatwoot decides what each person may see and do.
 
-This is an early version: 34 tools. 24 only read, 3 make safe additions that cannot reach a customer, and 7 are actions that change things and always ask first. See [What is not here yet](#what-is-not-here-yet).
+This is an early version: 44 tools. 30 only read, 5 make safe changes that cannot reach a customer, and 9 are actions that change things and always ask first. See [What is not here yet](#what-is-not-here-yet).
 
 ## Tools
 
@@ -17,20 +17,26 @@ Read (always available):
 | `search_conversations` | Find chats whose messages contain some words. |
 | `get_conversation` | Open one chat: status, customer, assignee, team, labels, last message. |
 | `get_messages` | Read the messages in a chat. Customer text is wrapped in `<untrusted_content>`. |
+| `filter_conversations` | Find chats by detailed conditions joined by all or any: status, priority, assignee, team, inbox, labels, dates (including "no activity for N days"), email subject or a custom field. |
+| `list_conversation_attachments` | The files sent in a chat: type, size and who sent it. Files are not opened and no download links are given. |
 | `get_conversation_counts` | Count chats: yours, assigned, unassigned, all. |
 | `get_conversation_labels` | The labels on one chat. |
 | `search_contacts` | Find customers by name, email, phone or identifier. |
 | `get_contact` | Open one customer. |
 | `list_contacts` | Browse customers, 15 per page, optionally by label. |
 | `get_contact_labels` | The labels on one customer. |
+| `get_contact_notes` | The team's notes about one customer. |
 | `get_contact_conversations` | All chats one customer has had. |
 | `list_inboxes` / `list_agents` / `list_teams` / `list_labels` / `list_canned_responses` | Small lists of names and ids the assistant needs for the other tools. |
 | `get_inbox` | One inbox's settings (greeting, working hours, auto-assignment). Never its webhook address or secrets. |
 | `list_team_members` | The agents in one team. |
 | `list_custom_attribute_definitions` | The custom fields defined for chats or customers, with their allowed values. |
+| `search_help_articles` | Search the help-centre articles, to answer from what the company wrote. Drafts are included and marked by `status`. |
+| `list_macros` | The macros (saved sets of steps) the key's owner can run, with their steps. |
 | `get_account` | The account's name, language, status and support address. No billing or settings. |
 | `get_report_summary` | Chat counts, reply and resolution times and satisfaction scores for a period, with the period before for comparison. |
 | `get_report_by_group` | The same kind of numbers split by agent, team, inbox, label or channel. |
+| `list_csat_responses` | Satisfaction-survey answers for a period: score and the customer's words (wrapped as untrusted), by score, agent, inbox or team. |
 | `get_first_response_distribution` | How quickly first replies went out, in time bands, per channel. |
 
 Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; none can reach a customer):
@@ -40,6 +46,8 @@ Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; none can reach a custo
 | `add_private_note` | Add an internal note to a chat. Refuses to report success if Chatwoot did not mark it private. |
 | `add_conversation_labels` | Add labels to a chat. Existing labels stay; labels that do not exist are refused. |
 | `add_contact_labels` | The same for a customer. |
+| `remove_conversation_labels` | Take labels off a chat. Other labels stay. |
+| `add_contact_note` | Add a note about a customer, shown to the team beside every chat with them. |
 
 Actions (only exist when `CHATWOOT_MCP_ENABLE_ACTIONS=true`; each one asks first, see [The confirm step](#the-confirm-step)):
 
@@ -51,6 +59,8 @@ Actions (only exist when `CHATWOOT_MCP_ENABLE_ACTIONS=true`; each one asks first
 | `set_conversation_priority` | Set a chat's priority: none, low, medium, high or urgent. |
 | `create_conversation` | Start a new chat with a customer in an inbox, optionally with a first message the customer receives. |
 | `create_contact` | Create a customer. Needs at least one of email, phone number or identifier. |
+| `set_conversation_custom_attributes` | Fill in a chat's custom fields. Only fields that exist are accepted; other fields stay as they are. |
+| `run_macro` | Run a macro on one chat. The preview lists every step and warns if any step reaches the customer or an outside address. |
 | `update_contact` | Change a customer's name, email, phone number or identifier. |
 
 Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, so an assistant cannot move to another account.
@@ -75,7 +85,7 @@ The token is tied to the person's key, the tool and the exact arguments, so it c
 
 ## Other safety habits
 
-- **Read-only by default.** The three write tools need `CHATWOOT_MCP_ENABLE_WRITES=true` and the seven action tools need `CHATWOOT_MCP_ENABLE_ACTIONS=true`; otherwise they do not exist for the assistant.
+- **Read-only by default.** The five write tools need `CHATWOOT_MCP_ENABLE_WRITES=true` and the nine action tools need `CHATWOOT_MCP_ENABLE_ACTIONS=true`; otherwise they do not exist for the assistant.
 - **Customer text is marked untrusted.** Message text is wrapped in `<untrusted_content>` and the server tells the assistant to treat it as data, never as instructions. A closing tag typed by a customer is neutralised.
 - **Short replies.** Chatwoot's large payloads are reduced to the useful fields; lists and text are capped (`CHATWOOT_MCP_MAX_ITEMS`, `CHATWOOT_MCP_MAX_TEXT_CHARS`).
 - **No deleting, no settings, no user management, no platform API.**
@@ -139,5 +149,5 @@ The tests use a pretend Chatwoot and need no real server. See [CLAUDE.md](./CLAU
 
 - **Moneta login and per-user keys.** Hosted mode today expects each caller to bring their own Chatwoot key. Signing in with the Moneta login (Cognito) and getting a key made automatically for each person is planned, and would live in a separate `platform/` package.
 - **Shared confirm storage** for running several server processes.
-- **Chatwoot features outside support chats:** campaigns, help centre, automation, webhooks, attachments, WhatsApp templates, the audit log, merging customers and creating labels.
+- **Chatwoot features outside support chats:** campaigns, editing the help centre, automation, webhooks, opening attachments, WhatsApp templates, the audit log, merging customers and creating labels or macros.
 - **Deleting anything, and user, team or inbox management.** Left out on purpose.

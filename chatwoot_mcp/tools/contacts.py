@@ -1,4 +1,4 @@
-"""Reading customers: find one, open one, see their chats."""
+"""Reading customers: find one, open one, see their chats and the team's notes about them."""
 
 from __future__ import annotations
 
@@ -73,3 +73,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """List the labels on one customer."""
         data = await ctx.client.get_account(f"/contacts/{contact_id}/labels")
         return {"contact_id": contact_id, "labels": (data.get("payload") if isinstance(data, dict) else None) or []}
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:contacts"})
+    @reporting_errors
+    async def get_contact_notes(contact_id: ContactId) -> dict[str, Any]:
+        """Read the team's notes about one customer, newest first. Customers never see these."""
+        items, cut = shaping.limit_items(
+            shaping.rows(await ctx.client.get_account(f"/contacts/{contact_id}/notes")), shown
+        )
+        return {
+            "contact_id": contact_id,
+            **page_info(1, cut, shown),
+            "notes": [shaping.compact_note(n, text_limit) for n in items if isinstance(n, dict)],
+        }

@@ -1,11 +1,11 @@
-"""Reading chats: list, search, open one, read its messages, count them."""
+"""Reading chats: list, search, filter, open one, read its messages and attachments, count them."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from chatwoot_mcp import shaping
 from chatwoot_mcp.tools.support import READ_ONLY, TIER_READ, ToolContext, page_info, reporting_errors
@@ -17,6 +17,37 @@ InboxId = Annotated[int | None, Field(ge=1, description="Only chats in this inbo
 TeamId = Annotated[int | None, Field(ge=1, description="Only chats assigned to this team. Use list_teams for ids.")]
 Labels = Annotated[list[str] | None, Field(description="Only chats that carry at least one of these labels.")]
 Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
+FilterOperator = Literal[
+    "equal_to",
+    "not_equal_to",
+    "contains",
+    "does_not_contain",
+    "is_present",
+    "is_not_present",
+    "is_greater_than",
+    "is_less_than",
+    "days_before",
+]
+
+
+class Condition(BaseModel):
+    field: str = Field(
+        min_length=1,
+        max_length=100,
+        description=(
+            "status, priority, assignee_id, team_id, inbox_id, contact_id, labels, created_at, last_activity_at, "
+            "mail_subject, or a custom attribute key from list_custom_attribute_definitions."
+        ),
+    )
+    operator: FilterOperator
+    values: list[str | int] = Field(
+        default_factory=list,
+        max_length=20,
+        description=(
+            "What to compare with. Dates as 2026-10-01; days_before takes a number of days (1 to 998); "
+            "is_present and is_not_present take none."
+        ),
+    )
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -70,6 +101,28 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
     @reporting_errors
+    async def filter_conversations(
+        conditions: Annotated[list[Condition], Field(min_length=1, max_length=10, description="The conditions.")],
+        match: Annotated[Literal["all", "any"], Field(description="Chats must meet all conditions, or any.")] = "all",
+        page: Page = 1,
+    ) -> dict[str, Any]:
+        """Find chats by detailed conditions, for example high priority and unassigned, or no activity for 3 days.
+
+        Examples: {"field": "assignee_id", "operator": "is_not_present"};
+        {"field": "last_activity_at", "operator": "days_before", "values": [3]};
+        {"field": "priority", "operator": "equal_to", "values": ["high"]}.
+        """
+        join = "and" if match == "all" else "or"
+        payload = [
+            {"attribute_key": c.field, "filter_operator": c.operator, "values": c.values, "query_operator": join}
+            for c in conditions
+        ]
+        payload[-1]["query_operator"] = None  # Chatwoot refuses a joining word after the last condition
+        data = await ctx.client.post_account("/conversations/filter", {"payload": payload, "page": page})
+        return conversation_list(data, page)
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
+    @reporting_errors
     async def get_conversation(conversation_id: ConversationId) -> dict[str, Any]:
         """Open one chat: its status, customer, assignee, team, labels and last message."""
         data = await ctx.client.get_account(f"/conversations/{conversation_id}")
@@ -114,6 +167,27 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         params = {"status": status, "inbox_id": inbox_id, "team_id": team_id, "labels": labels}
         data = await ctx.client.get_account("/conversations/meta", params=params)
         return (data.get("meta") if isinstance(data, dict) else None) or {}
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
+    @reporting_errors
+    async def list_conversation_attachments(conversation_id: ConversationId, page: Page = 1) -> dict[str, Any]:
+        """List the files sent in a chat (type, size, who sent it), newest first. Files are not opened."""
+        data = await ctx.client.get_account(f"/conversations/{conversation_id}/attachments", params={"page": page})
+        items, cut = shaping.limit_items(shaping.rows(data), shown)
+        return {
+            "conversation_id": conversation_id,
+            **page_info(page, cut, shown),
+            "total_count": (data.get("meta") or {}).get("total_count") if isinstance(data, dict) else None,
+            "attachments": [
+                {
+                    **{key: a.get(key) for key in ("id", "message_id", "file_type", "extension", "file_size")},
+                    "created_at": a.get("created_at"),
+                    "sender": shaping.person(a.get("sender"), "id", "name", "type"),
+                }
+                for a in items
+                if isinstance(a, dict)
+            ],
+        }
 
     @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
     @reporting_errors

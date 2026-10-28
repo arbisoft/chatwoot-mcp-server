@@ -39,9 +39,11 @@ CHATWOOT_BASE_URL=... CHATWOOT_ACCOUNT_ID=1 CHATWOOT_API_TOKEN=... python -m cha
   log, and is never sent anywhere else. The client sends no cookies and no `X-Auth-Request-*` headers and does not
   follow redirects. Do not add a way around any of these.
 - **No account id in tool arguments.** The account comes from `CHATWOOT_ACCOUNT_ID`.
-- **Writes and actions are opt-in.** `tier:write` tools (private note, labels) are registered only when
+- **Writes and actions are opt-in.** `tier:write` tools (notes, labels) are registered only when
   `CHATWOOT_MCP_ENABLE_WRITES=true` and must never be able to reach a customer. `tier:action` tools (reply, assign,
-  status, priority, create chat, create or update customer) only when `CHATWOOT_MCP_ENABLE_ACTIONS=true`.
+  status, priority, custom fields, macros, create chat, create or update customer) only when
+  `CHATWOOT_MCP_ENABLE_ACTIONS=true`. A `run_macro` preview warns about every step that reaches the customer or
+  leaves Chatwoot (`OUTWARD_MACRO_STEPS`).
   `add_private_note` checks Chatwoot marked the note private; `send_reply` checks it did not.
 - **Every action has two steps** (`gated()` in `tools/actions.py`). The first call changes nothing and returns a
   preview plus a `confirm_token`; the second, with the same arguments and the token, does it. Tokens are tied to the
@@ -79,6 +81,9 @@ anything Chatwoot does as a side effect (for example, reopening a chat assigns i
   moment in 1970, and the chat wakes at once.
 - Changing a chat's team drops an assignee who is not in that team, so `assign_conversation` sets the team first.
 - The `labels` filter on chat and customer lists matches *any* of the labels, not all.
+- `POST .../conversations/{id}/custom_attributes` also **replaces** the whole set (unless `merge` is sent, which
+  older versions ignore), so the tool sends the current fields plus the new ones.
+- Macros run in a background job (Sidekiq): `execute` answers at once and the steps happen shortly after.
 - Report timestamps are Unix seconds. The tool takes `YYYY-MM-DD` dates (UTC) and converts them.
 - Some report routes exist only in the Enterprise edition or in some versions.
 - Under the Moneta SSO setup the public host puts logins in front of `/api`, so a hosted MCP server should call

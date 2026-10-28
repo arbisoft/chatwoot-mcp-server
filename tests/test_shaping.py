@@ -101,6 +101,7 @@ def test_compact_conversation():
         "contact": {"id": 4, "name": "Sam", "email": "sam@example.com", "phone_number": None},
         "assignee": {"id": 8, "name": "Ana", "email": "ana@example.com"},
         "team": {"id": 2, "name": "Support"},
+        "custom_attributes": {"plan": "<untrusted_content>pro</untrusted_content>"},
         "last_message": {
             "id": 40,
             "type": "incoming",

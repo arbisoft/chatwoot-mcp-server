@@ -1,4 +1,4 @@
-"""Numbers: the report summary."""
+"""Numbers: report summaries, and what customers said in satisfaction surveys."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from chatwoot_mcp import shaping
-from chatwoot_mcp.tools.support import READ_ONLY, TIER_READ, ToolContext, reporting_errors
+from chatwoot_mcp.tools.support import READ_ONLY, TIER_READ, ToolContext, page_info, reporting_errors
 
 ReportType = Literal["account", "agent", "inbox", "label", "team"]
 GroupBy = Literal["agent", "team", "inbox", "label", "channel"]
@@ -92,3 +92,47 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         params = {"since": start, "until": end}
         data = await ctx.client.get_account("/reports/first_response_time_distribution", params=params, version=2)
         return data if isinstance(data, dict) else {"result": data}
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
+    @reporting_errors
+    async def list_csat_responses(
+        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
+        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+        ratings: Annotated[
+            list[Annotated[int, Field(ge=1, le=5)]] | None, Field(description="Only these scores, 1 (worst) to 5.")
+        ] = None,
+        agent_id: Annotated[int | None, Field(ge=1, description="Only chats this agent handled.")] = None,
+        inbox_id: Annotated[int | None, Field(ge=1, description="Only chats in this inbox.")] = None,
+        team_id: Annotated[int | None, Field(ge=1, description="Only chats of this team.")] = None,
+        page: Annotated[int, Field(ge=1, description="Page number, starting at 1.")] = 1,
+    ) -> dict[str, Any]:
+        """Read satisfaction-survey answers: the score and what the customer wrote, newest first. 25 per page."""
+        start, end = day_range(since, until)
+        params = {
+            "since": start,
+            "until": end,
+            "rating": ratings,
+            "user_ids": [agent_id] if agent_id else None,
+            "inbox_id": inbox_id,
+            "team_id": team_id,
+            "page": page,
+        }
+        items, cut = shaping.limit_items(
+            shaping.rows(await ctx.client.get_account("/csat_survey_responses", params=params)), ctx.settings.max_items
+        )
+        return {
+            **page_info(page, cut, ctx.settings.max_items),
+            "responses": [
+                {
+                    "id": r.get("id"),
+                    "rating": r.get("rating"),
+                    "feedback": shaping.wrap_untrusted(r.get("feedback_message"), ctx.settings.max_text_chars),
+                    "conversation_id": r.get("conversation_id"),
+                    "contact": shaping.person(r.get("contact"), "id", "name"),
+                    "agent": shaping.person(r.get("assigned_agent"), "id", "name"),
+                    "created_at": r.get("created_at"),
+                }
+                for r in items
+                if isinstance(r, dict)
+            ],
+        }

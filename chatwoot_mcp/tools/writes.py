@@ -1,4 +1,4 @@
-"""The two safe writes. Neither can reach a customer. Only registered when CHATWOOT_MCP_ENABLE_WRITES=true."""
+"""Safe writes: notes and labels. None can reach a customer. Only registered when CHATWOOT_MCP_ENABLE_WRITES=true."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from chatwoot_mcp import shaping
-from chatwoot_mcp.tools.support import SAFE_IDEMPOTENT_WRITE, SAFE_WRITE, TIER_WRITE, ToolContext, reporting_errors
+from chatwoot_mcp.tools.support import (
+    SAFE_IDEMPOTENT_WRITE,
+    SAFE_WRITE,
+    TIER_WRITE,
+    ToolContext,
+    reporting_errors,
+)
 
 MAX_NOTE_CHARS = 5000
 MAX_LABELS_PER_CALL = 20
@@ -40,6 +46,20 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             # Never report success for something that might have reached the customer.
             raise ToolError("Chatwoot did not mark the message private. Check the chat in Chatwoot right away.")
         return message
+
+    @mcp.tool(annotations=SAFE_WRITE, tags={TIER_WRITE, "module:writes"})
+    @reporting_errors
+    async def add_contact_note(
+        contact_id: Annotated[int, Field(ge=1, description="The customer's id.")],
+        content: Annotated[
+            str, Field(min_length=1, max_length=MAX_NOTE_CHARS, description="The note text. Only the team sees it.")
+        ],
+    ) -> dict[str, Any]:
+        """Add a note about a customer, shown to the team next to every chat with them. Never sent to the customer."""
+        if not content.strip():
+            raise ToolError("The note is empty.")
+        data = await ctx.client.post_account(f"/contacts/{contact_id}/notes", {"note": {"content": content}})
+        return {"contact_id": contact_id, **shaping.compact_note(data if isinstance(data, dict) else {}, text_limit)}
 
     async def add_labels(path: str, labels: list[str]) -> list[str]:
         """Add labels to a chat or a customer. Chatwoot replaces the whole set, so read it and send the union."""
@@ -74,3 +94,21 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Add labels to a customer. Existing labels stay. Unknown labels are refused; see list_labels."""
         result = await add_labels(f"/contacts/{contact_id}/labels", labels)
         return {"contact_id": contact_id, "labels": result}
+
+    @mcp.tool(annotations=SAFE_IDEMPOTENT_WRITE, tags={TIER_WRITE, "module:writes"})
+    @reporting_errors
+    async def remove_conversation_labels(
+        conversation_id: Annotated[int, Field(ge=1, description="The conversation number.")],
+        labels: Annotated[
+            list[str], Field(min_length=1, max_length=MAX_LABELS_PER_CALL, description="Label titles to take off.")
+        ],
+    ) -> dict[str, Any]:
+        """Take labels off a chat. Other labels stay. Labels the chat does not have are ignored."""
+        path = f"/conversations/{conversation_id}/labels"
+        drop = {label.lower() for label in labels}
+        kept = [label for label in shaping.rows(await ctx.client.get_account(path)) if label not in drop]
+        data = await ctx.client.post_account(path, {"labels": kept})
+        return {
+            "conversation_id": conversation_id,
+            "labels": data.get("payload", kept) if isinstance(data, dict) else kept,
+        }

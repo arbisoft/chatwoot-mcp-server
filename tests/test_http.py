@@ -42,7 +42,7 @@ def test_health_check_needs_no_key(app):
 def test_the_tool_list_is_served_without_a_key(app):
     with TestClient(app) as client:
         result = rpc(client, "tools/list", {})
-    assert len(result["tools"]) == 24
+    assert len(result["tools"]) == 30
 
 
 def test_each_caller_acts_with_their_own_key(app, chatwoot):

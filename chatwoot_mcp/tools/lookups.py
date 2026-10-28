@@ -127,3 +127,35 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Show the account's name, language, status and support address. No billing or settings."""
         data = await ctx.client.get_account("")
         return _pick(data, "id", "name", "locale", "status", "domain", "support_email", "created_at")
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:lookups"})
+    @reporting_errors
+    async def search_help_articles(
+        query: Annotated[str, Field(min_length=1, max_length=200, description="Words to find in the articles.")],
+        page: Annotated[int, Field(ge=1, description="Page number, starting at 1.")] = 1,
+    ) -> dict[str, Any]:
+        """Search the help-centre articles, to answer from what the company has written. 15 per page.
+
+        Drafts and archived articles are included; check `status` before quoting one to a customer.
+        """
+        data = await ctx.client.get_account("/search/articles", params={"q": query, "page": page})
+        found = ((data.get("payload") or {}).get("articles") if isinstance(data, dict) else None) or []
+        items, cut = shaping.limit_items(found, shown)
+        out: dict[str, Any] = {"page": page, "articles": []}
+        for item in items:
+            row = _pick(item, "id", "title", "status", "category_name", "locale", "portal_slug", "slug", "updated_at")
+            content = item.get("content") if isinstance(item, dict) else None
+            row["content"] = content[:text_limit] if isinstance(content, str) else content
+            out["articles"].append(row)
+        if cut:
+            out["truncated"] = f"Only the first {shown} items are shown."
+        return out
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:lookups"})
+    @reporting_errors
+    async def list_macros() -> dict[str, Any]:
+        """List the macros you can run: saved sets of steps, such as label, assign and resolve, with their steps."""
+        out = await listing("/macros", "macros", "id", "name", "visibility", "actions")
+        for row in out["macros"]:
+            row["steps"] = shaping.macro_steps(row.pop("actions"))
+        return out

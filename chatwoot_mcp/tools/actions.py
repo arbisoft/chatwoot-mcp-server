@@ -21,6 +21,7 @@ from chatwoot_mcp.client import ChatwootError
 from chatwoot_mcp.tools.support import (
     ACTION_ADDS,
     ACTION_OVERWRITES,
+    ACTION_RUNS_STEPS,
     TIER_ACTION,
     ToolContext,
     reporting_errors,
@@ -32,6 +33,13 @@ NEXT_STEP = (
     "Show this preview to the user. Only after they clearly agree, call this tool again with the same arguments "
     "and this confirm_token. Do not call it again without their agreement."
 )
+# Macro steps that reach the customer or leave Chatwoot.
+OUTWARD_MACRO_STEPS = {
+    "send_message": "sends a message to the customer",
+    "send_attachment": "sends a file to the customer",
+    "send_email_transcript": "emails the chat transcript",
+    "send_webhook_event": "sends the chat's data to an outside web address",
+}
 PHONE = re.compile(r"\+[1-9][0-9]{6,14}")
 
 ConversationId = Annotated[int, Field(ge=1, description="The conversation number.")]
@@ -397,3 +405,88 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         arguments = {"contact_id": contact_id, **fields}
         return await gated("update_contact", arguments, confirm_token, build_preview, execute)
+
+    # --- set_conversation_custom_attributes ----------------------------------------------------------------------
+
+    @mcp.tool(annotations=ACTION_OVERWRITES, tags={TIER_ACTION, "module:actions"})
+    @reporting_errors
+    async def set_conversation_custom_attributes(
+        conversation_id: ConversationId,
+        attributes: Annotated[
+            dict[str, str | int | float | bool],
+            Field(
+                min_length=1,
+                max_length=20,
+                description="Field keys and new values. Keys from list_custom_attribute_definitions.",
+            ),
+        ],
+        confirm_token: ConfirmToken = None,
+    ) -> dict[str, Any]:
+        """Fill in a chat's custom fields, such as an order number. Fields not given stay as they are."""
+
+        async def build_preview() -> dict[str, Any]:
+            params = {"attribute_model": "conversation_attribute"}
+            known = {
+                row.get("attribute_key")
+                for row in shaping.rows(await ctx.client.get_account("/custom_attribute_definitions", params=params))
+                if isinstance(row, dict)
+            }
+            unknown = sorted(set(attributes) - known)
+            if unknown:
+                raise ToolError(
+                    f"These fields do not exist: {', '.join(unknown)}. Use list_custom_attribute_definitions."
+                )
+            chat = await conversation(conversation_id)
+            current = chat.get("custom_attributes") or {}
+            changes = {
+                key: {"from": shaping.attribute_values({key: current.get(key)})[key], "to": value}
+                for key, value in attributes.items()
+                if current.get(key) != value
+            }
+            if not changes:
+                raise ToolError("The chat already has these values. Nothing would change.")
+            return {**chat_summary(chat), "changes": changes}
+
+        async def execute() -> dict[str, Any]:
+            # Chatwoot replaces the whole set unless told to merge, so send the current fields plus the new ones.
+            current = (await conversation(conversation_id)).get("custom_attributes") or {}
+            body = {"custom_attributes": {**current, **attributes}}
+            data = await ctx.client.post_account(f"/conversations/{conversation_id}/custom_attributes", body)
+            saved = data.get("custom_attributes") if isinstance(data, dict) else None
+            return {"conversation_id": conversation_id, "custom_attributes": shaping.attribute_values(saved)}
+
+        arguments = {"conversation_id": conversation_id, "attributes": attributes}
+        return await gated("set_conversation_custom_attributes", arguments, confirm_token, build_preview, execute)
+
+    # --- run_macro -----------------------------------------------------------------------------------------------
+
+    @mcp.tool(annotations=ACTION_RUNS_STEPS, tags={TIER_ACTION, "module:actions"})
+    @reporting_errors
+    async def run_macro(
+        macro_id: Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")],
+        conversation_id: ConversationId,
+        confirm_token: ConfirmToken = None,
+    ) -> dict[str, Any]:
+        """Run a macro (a saved set of steps) on one chat. The preview lists every step it will take."""
+
+        async def build_preview() -> dict[str, Any]:
+            macro = _payload(await ctx.client.get_account(f"/macros/{macro_id}"))
+            chat = await conversation(conversation_id)
+            steps = shaping.macro_steps(macro.get("actions"))
+            preview: dict[str, Any] = {**chat_summary(chat), "macro": macro.get("name"), "steps": steps}
+            outward = [OUTWARD_MACRO_STEPS[s["step"]] for s in steps if s["step"] in OUTWARD_MACRO_STEPS]
+            if outward:
+                preview["warning"] = f"This macro {', and '.join(outward)}. That cannot be undone."
+            return preview
+
+        async def execute() -> dict[str, Any]:
+            await ctx.client.post_account(f"/macros/{macro_id}/execute", {"conversation_ids": [conversation_id]})
+            return {
+                "macro_id": macro_id,
+                "conversation_id": conversation_id,
+                "status": "started",
+                "note": "Chatwoot runs macros in the background. Read the chat again in a moment to see the result.",
+            }
+
+        arguments = {"macro_id": macro_id, "conversation_id": conversation_id}
+        return await gated("run_macro", arguments, confirm_token, build_preview, execute)

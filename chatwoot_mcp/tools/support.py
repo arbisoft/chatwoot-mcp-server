@@ -31,6 +31,8 @@ SAFE_IDEMPOTENT_WRITE = ToolAnnotations(
 # Actions change things for customers or colleagues. "Destructive" means it overwrites what was there.
 ACTION_ADDS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 ACTION_OVERWRITES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+# A macro can overwrite (assign, status) and repeat (send a message again): neither safe to repeat nor additive.
+ACTION_RUNS_STEPS = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
 
 @dataclass(frozen=True)
