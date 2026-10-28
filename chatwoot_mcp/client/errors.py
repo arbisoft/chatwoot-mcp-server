@@ -26,6 +26,13 @@ def error_for_status(status: int, body: object) -> ChatwootError:
         reason = _reason(body)
         suffix = f" Reason: {reason}" if reason else ""
         return ChatwootError(f"Chatwoot refused the request.{suffix}", status)
+    if 300 <= status < 400:
+        # Redirects are never followed. Behind Moneta SSO this is usually the login page in front of /api.
+        return ChatwootError(
+            f"Chatwoot redirected the request (HTTP {status}) instead of answering, often to a login page. "
+            "Point CHATWOOT_BASE_URL at Chatwoot's internal address.",
+            status,
+        )
     if status >= 500:
         return ChatwootError(f"Chatwoot failed on its side (HTTP {status}). Try again later.", status)
     return ChatwootError(f"Chatwoot answered with an unexpected status (HTTP {status}).", status)

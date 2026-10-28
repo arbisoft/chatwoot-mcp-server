@@ -175,6 +175,14 @@ async def test_assign_preview_names_who_and_who_it_replaces(chatwoot, make_clien
     assert p["assign_to_agent"]["name"] == "Ana" and p["assign_to_team"]["name"] == "Support"
     assert p["currently"]["agent"]["name"] == "Old Agent"
     assert changes(chatwoot) == []
+    assert "side_effect" not in p
+
+
+async def test_assigning_only_a_team_warns_the_current_agent_may_be_removed(chatwoot, make_client):
+    conversation_routes(chatwoot)
+    chatwoot.add("GET", f"{ACCOUNT}/teams", TEAMS)
+    out = await preview(make_client(**ON), "assign_conversation", conversation_id=12, team_id=2)
+    assert "not in that team, Chatwoot removes them" in out["preview"]["side_effect"]
 
 
 async def test_assign_to_an_agent_or_team_that_does_not_exist_is_refused_before_any_token(chatwoot, make_client):
@@ -187,7 +195,7 @@ async def test_assign_to_an_agent_or_team_that_does_not_exist_is_refused_before_
         await call(make_client(**ON), "assign_conversation", conversation_id=12, team_id=99)
 
 
-async def test_assign_sends_the_agent_then_the_team(chatwoot, make_client):
+async def test_assign_sends_the_team_then_the_agent_so_the_team_change_cannot_drop_the_agent(chatwoot, make_client):
     conversation_routes(chatwoot)
     chatwoot.add("GET", f"{ACCOUNT}/agents", AGENTS)
     chatwoot.add("GET", f"{ACCOUNT}/teams", TEAMS)
@@ -197,7 +205,7 @@ async def test_assign_sends_the_agent_then_the_team(chatwoot, make_client):
     out = await call(client, "assign_conversation", conversation_id=12, agent_id=8, team_id=2, confirm_token=token)
     import json
 
-    assert [json.loads(r.read()) for r in changes(chatwoot)] == [{"assignee_id": 8}, {"team_id": 2}]
+    assert [json.loads(r.read()) for r in changes(chatwoot)] == [{"team_id": 2}, {"assignee_id": 8}]
     assert out == {"conversation_id": 12, "assigned_agent_id": 8, "assigned_team_id": 2}
 
 
@@ -210,7 +218,7 @@ async def test_assign_says_clearly_when_only_part_of_it_worked(chatwoot, make_cl
     def handler(request):
         if request.method == "POST":
             calls.append(request)
-            return httpx.Response(200 if len(calls) == 1 else 422, json={"message": "Team is archived"})
+            return httpx.Response(200 if len(calls) == 1 else 422, json={"message": "Agent is not an inbox member"})
         return chatwoot(request)
 
     server = build_server(chatwoot_settings(), token_getter=lambda: "user-key", transport=httpx.MockTransport(handler))
@@ -218,7 +226,7 @@ async def test_assign_says_clearly_when_only_part_of_it_worked(chatwoot, make_cl
         token = (
             await client.call_tool("assign_conversation", {"conversation_id": 12, "agent_id": 8, "team_id": 2})
         ).data["confirm_token"]
-        with pytest.raises(ToolError, match="agent was assigned, but assigning the team failed"):
+        with pytest.raises(ToolError, match="team was assigned, but assigning the agent failed"):
             await client.call_tool(
                 "assign_conversation", {"conversation_id": 12, "agent_id": 8, "team_id": 2, "confirm_token": token}
             )
@@ -288,7 +296,8 @@ async def test_snoozing_needs_a_future_time_with_a_time_zone(chatwoot, make_clie
         snoozed_until="2099-01-01T09:00:00+00:00",
         confirm_token=token,
     )
-    assert chatwoot.last_json() == {"status": "snoozed", "snoozed_until": "2099-01-01T09:00:00+00:00"}
+    # Chatwoot reads snoozed_until with strptime('%s'): an ISO string would become a time in 1970.
+    assert chatwoot.last_json() == {"status": "snoozed", "snoozed_until": 4070941200}
 
 
 async def test_a_snooze_time_with_any_other_status_is_refused(chatwoot, make_client):

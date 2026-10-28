@@ -58,6 +58,12 @@ async def test_adding_a_label_twice_does_not_duplicate_it(chatwoot, make_client)
     assert chatwoot.last_json() == {"labels": ["vip", "refund", "bug"]}
 
 
+async def test_labels_match_in_any_case_because_chatwoot_stores_them_lower_case(chatwoot, make_client):
+    label_routes(chatwoot, existing=["vip"])
+    await call(make_client(**ON), "add_conversation_labels", conversation_id=12, labels=["Refund"])
+    assert chatwoot.last_json() == {"labels": ["vip", "refund"]}
+
+
 async def test_unknown_labels_are_refused_so_none_are_invented(chatwoot, make_client):
     label_routes(chatwoot, existing=[])
     with pytest.raises(ToolError, match="do not exist: made-up"):

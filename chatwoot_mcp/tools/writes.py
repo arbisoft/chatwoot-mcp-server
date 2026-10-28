@@ -43,14 +43,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     async def add_labels(path: str, labels: list[str]) -> list[str]:
         """Add labels to a chat or a customer. Chatwoot replaces the whole set, so read it and send the union."""
-        known = await ctx.client.get_account("/labels")
-        rows = known.get("payload", []) if isinstance(known, dict) else []
-        titles = {row.get("title") for row in rows if isinstance(row, dict)}
+        labels = [label.lower() for label in labels]  # Chatwoot stores every label title in lower case
+        known = shaping.rows(await ctx.client.get_account("/labels"))
+        titles = {row.get("title") for row in known if isinstance(row, dict)}
         unknown = sorted({label for label in labels if label not in titles})
         if unknown:
             raise ToolError(f"These labels do not exist: {', '.join(unknown)}. Use list_labels to see the real ones.")
         current = await ctx.client.get_account(path)
-        have = current.get("payload", []) if isinstance(current, dict) else []
+        have = shaping.rows(current)
         merged = list(dict.fromkeys([*have, *labels]))
         data = await ctx.client.post_account(path, {"labels": merged})
         return data.get("payload", merged) if isinstance(data, dict) else merged

@@ -15,7 +15,7 @@ Assignee = Literal["me", "unassigned", "all", "assigned"]
 ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
 InboxId = Annotated[int | None, Field(ge=1, description="Only chats in this inbox. Use list_inboxes to find ids.")]
 TeamId = Annotated[int | None, Field(ge=1, description="Only chats assigned to this team. Use list_teams for ids.")]
-Labels = Annotated[list[str] | None, Field(description="Only chats that carry all of these labels.")]
+Labels = Annotated[list[str] | None, Field(description="Only chats that carry at least one of these labels.")]
 Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
 
 
@@ -84,7 +84,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = None,
         after: Annotated[int | None, Field(ge=1, description="Only messages newer than this message id.")] = None,
     ) -> dict[str, Any]:
-        """Read the messages in a chat, oldest first. Customer text is wrapped in <untrusted_content>."""
+        """Read a chat's messages, oldest first. With no ids, the latest 20; pass `before` to read further back.
+
+        Customer text is wrapped in <untrusted_content>.
+        """
         params = {"before": before, "after": after}
         data = await ctx.client.get_account(f"/conversations/{conversation_id}/messages", params=params)
         items, cut = shaping.limit_items(data.get("payload") if isinstance(data, dict) else None, shown)

@@ -74,6 +74,11 @@ anything Chatwoot does as a side effect (for example, reopening a chat assigns i
 - `POST .../conversations/{id}/labels` **replaces** the whole label set, so `add_conversation_labels` reads the
   current labels first and sends the union. Labels that do not exist in the account are refused, to avoid creating
   stray tags.
+- Label titles are stored in lower case, so the label tools lower-case what they are given before matching.
+- `toggle_status` reads `snoozed_until` with `strptime('%s')`: send Unix seconds. An ISO string parses as a
+  moment in 1970, and the chat wakes at once.
+- Changing a chat's team drops an assignee who is not in that team, so `assign_conversation` sets the team first.
+- The `labels` filter on chat and customer lists matches *any* of the labels, not all.
 - Report timestamps are Unix seconds. The tool takes `YYYY-MM-DD` dates (UTC) and converts them.
 - Some report routes exist only in the Enterprise edition or in some versions.
 - Under the Moneta SSO setup the public host puts logins in front of `/api`, so a hosted MCP server should call

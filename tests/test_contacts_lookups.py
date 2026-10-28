@@ -36,7 +36,7 @@ async def test_search_contacts_needs_some_words(chatwoot, make_client):
 async def test_get_contact_unwraps_chatwoots_payload(chatwoot, make_client):
     chatwoot.add("GET", f"{ACCOUNT}/contacts/4", {"payload": CONTACT})
     out = await call(make_client(), "get_contact", contact_id=4)
-    assert out["id"] == 4 and out["custom_attributes"] == {"plan": "pro"}
+    assert out["id"] == 4 and out["custom_attributes"] == {"plan": "<untrusted_content>pro</untrusted_content>"}
 
 
 async def test_get_contact_conversations_lists_their_chats(chatwoot, make_client):

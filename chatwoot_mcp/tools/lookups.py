@@ -15,21 +15,12 @@ def _pick(item: Any, *fields: str) -> dict[str, Any]:
     return {field: item.get(field) for field in fields} if isinstance(item, dict) else {}
 
 
-def _rows(data: Any) -> list[Any]:
-    """Chatwoot answers some lists as a bare array and some as {"payload": [...]}."""
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and isinstance(data.get("payload"), list):
-        return data["payload"]
-    return []
-
-
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     shown = ctx.settings.max_items
     text_limit = ctx.settings.max_text_chars
 
     async def listing(path: str, key: str, *fields: str) -> dict[str, Any]:
-        items, cut = shaping.limit_items(_rows(await ctx.client.get_account(path)), shown)
+        items, cut = shaping.limit_items(shaping.rows(await ctx.client.get_account(path)), shown)
         out: dict[str, Any] = {key: [_pick(item, *fields) for item in items]}
         if cut:
             out["truncated"] = f"Only the first {shown} items are shown."
@@ -114,7 +105,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """List the custom fields the team has defined, with their keys and allowed values."""
         params = {"attribute_model": f"{model}_attribute"}
         items, cut = shaping.limit_items(
-            _rows(await ctx.client.get_account("/custom_attribute_definitions", params=params)), shown
+            shaping.rows(await ctx.client.get_account("/custom_attribute_definitions", params=params)), shown
         )
         fields = (
             "id",

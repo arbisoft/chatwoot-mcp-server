@@ -48,16 +48,6 @@ Status = Literal["open", "pending", "snoozed", "resolved"]
 Priority = Literal["none", "low", "medium", "high", "urgent"]
 
 
-def _person(raw: Any, *fields: str) -> dict[str, Any] | None:
-    return {field: raw.get(field) for field in fields} if isinstance(raw, dict) and raw else None
-
-
-def _rows(data: Any) -> list[Any]:
-    if isinstance(data, list):
-        return data
-    return data.get("payload", []) if isinstance(data, dict) and isinstance(data.get("payload"), list) else []
-
-
 def _payload(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         inner = data.get("payload", data)
@@ -110,7 +100,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "conversation_id": raw.get("id"),
             "status": raw.get("status"),
             "channel": meta.get("channel"),
-            "contact": _person(meta.get("sender"), "name", "email"),
+            "contact": shaping.person(meta.get("sender"), "name", "email"),
         }
 
     # --- send_reply ----------------------------------------------------------------------------------------------
@@ -132,7 +122,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             meta = chat.get("meta") or {}
             return {
                 "conversation_id": conversation_id,
-                "to": _person(meta.get("sender"), "name", "email"),
+                "to": shaping.person(meta.get("sender"), "name", "email"),
                 "channel": meta.get("channel"),
                 "message": content,
                 "warning": SENT_TO_CUSTOMER,
@@ -169,35 +159,44 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             agent = team = None
             if agent_id is not None:
                 agent = next(
-                    (a for a in _rows(await ctx.client.get_account("/agents")) if a.get("id") == agent_id), None
+                    (a for a in shaping.rows(await ctx.client.get_account("/agents")) if a.get("id") == agent_id), None
                 )
                 if agent is None:
                     raise ToolError(f"No agent with id {agent_id}. Use list_agents.")
             if team_id is not None:
-                team = next((t for t in _rows(await ctx.client.get_account("/teams")) if t.get("id") == team_id), None)
+                team = next(
+                    (t for t in shaping.rows(await ctx.client.get_account("/teams")) if t.get("id") == team_id), None
+                )
                 if team is None:
                     raise ToolError(f"No team with id {team_id}. Use list_teams.")
-            return {
+            preview = {
                 **chat_summary(chat),
-                "assign_to_agent": _person(agent, "id", "name", "email"),
-                "assign_to_team": _person(team, "id", "name"),
+                "assign_to_agent": shaping.person(agent, "id", "name", "email"),
+                "assign_to_team": shaping.person(team, "id", "name"),
                 "currently": {
-                    "agent": _person(meta.get("assignee"), "id", "name", "email"),
-                    "team": _person(meta.get("team"), "id", "name"),
+                    "agent": shaping.person(meta.get("assignee"), "id", "name", "email"),
+                    "team": shaping.person(meta.get("team"), "id", "name"),
                 },
             }
+            if agent_id is None:
+                preview["side_effect"] = (
+                    "If the current agent is not in that team, Chatwoot removes them and may auto-assign "
+                    "a team member instead."
+                )
+            return preview
 
         async def execute() -> dict[str, Any]:
+            # Team first: changing the team drops an assignee who is not in it, which would undo an agent set before.
             path = f"/conversations/{conversation_id}/assignments"
-            if agent_id is not None:
-                await ctx.client.post_account(path, {"assignee_id": agent_id})
             if team_id is not None:
+                await ctx.client.post_account(path, {"team_id": team_id})
+            if agent_id is not None:
                 try:
-                    await ctx.client.post_account(path, {"team_id": team_id})
+                    await ctx.client.post_account(path, {"assignee_id": agent_id})
                 except ChatwootError as error:
-                    if agent_id is None:
+                    if team_id is None:
                         raise
-                    raise ToolError(f"The agent was assigned, but assigning the team failed: {error}") from None
+                    raise ToolError(f"The team was assigned, but assigning the agent failed: {error}") from None
             return {"conversation_id": conversation_id, "assigned_agent_id": agent_id, "assigned_team_id": team_id}
 
         arguments = {"conversation_id": conversation_id, "agent_id": agent_id, "team_id": team_id}
@@ -205,11 +204,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     # --- set_conversation_status ---------------------------------------------------------------------------------
 
-    def snooze_time(status: str, snoozed_until: str | None) -> None:
+    def snooze_time(status: str, snoozed_until: str | None) -> int | None:
+        """Check the wake time and return it as Unix seconds, the only form Chatwoot reads (`strptime '%s'`)."""
         if status != "snoozed":
             if snoozed_until is not None:
                 raise ToolError("`snoozed_until` can be used only with status snoozed.")
-            return
+            return None
         if snoozed_until is None:
             raise ToolError("Snoozing needs `snoozed_until`, like 2026-11-01T09:00:00+00:00.")
         try:
@@ -220,6 +220,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             raise ToolError("`snoozed_until` must be a date and time with a time zone, like 2026-11-01T09:00:00+00:00.")
         if moment <= datetime.now(UTC):
             raise ToolError("`snoozed_until` must be in the future.")
+        return int(moment.timestamp())
 
     @mcp.tool(annotations=ACTION_OVERWRITES, tags={TIER_ACTION, "module:actions"})
     @reporting_errors
@@ -232,7 +233,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         confirm_token: ConfirmToken = None,
     ) -> dict[str, Any]:
         """Change a chat's status: open, pending, snoozed or resolved."""
-        snooze_time(status, snoozed_until)
+        wake_at = snooze_time(status, snoozed_until)
 
         async def build_preview() -> dict[str, Any]:
             chat = await conversation(conversation_id)
@@ -248,8 +249,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         async def execute() -> dict[str, Any]:
             body: dict[str, Any] = {"status": status}
-            if snoozed_until:
-                body["snoozed_until"] = snoozed_until
+            if wake_at is not None:
+                body["snoozed_until"] = wake_at
             data = await ctx.client.post_account(f"/conversations/{conversation_id}/toggle_status", body)
             payload = _payload(data)
             return {
@@ -304,8 +305,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             contact = _payload(await ctx.client.get_account(f"/contacts/{contact_id}"))
             inbox = await ctx.client.get_account(f"/inboxes/{inbox_id}")
             preview: dict[str, Any] = {
-                "contact": _person(contact, "id", "name", "email"),
-                "inbox": _person(inbox, "id", "name", "channel_type"),
+                "contact": shaping.person(contact, "id", "name", "email"),
+                "inbox": shaping.person(inbox, "id", "name", "channel_type"),
                 "first_message": message,
             }
             if message:
@@ -388,7 +389,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             }
             if not changes:
                 raise ToolError("The customer already has these values. Nothing would change.")
-            return {"contact": _person(current, "id", "name", "email"), "changes": changes}
+            return {"contact": shaping.person(current, "id", "name", "email"), "changes": changes}
 
         async def execute() -> dict[str, Any]:
             data = await ctx.client.put_account(f"/contacts/{contact_id}", fields)

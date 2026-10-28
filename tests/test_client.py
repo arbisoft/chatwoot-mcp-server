@@ -175,6 +175,7 @@ async def test_redirects_are_not_followed_so_the_key_cannot_leak():
         seen.append(str(request.url))
         return httpx.Response(302, headers={"location": "https://evil.example.net/steal"})
 
-    with pytest.raises(ChatwootError):
+    with pytest.raises(ChatwootError, match="redirected the request .HTTP 302.") as raised:
         await make_client(handler).get_account("/labels")
     assert seen == ["https://chat.example.com/api/v1/accounts/7/labels"]
+    assert "evil.example.net" not in str(raised.value)
