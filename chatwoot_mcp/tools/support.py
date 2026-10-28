@@ -12,12 +12,14 @@ from mcp.types import ToolAnnotations
 
 from chatwoot_mcp.client import ChatwootClient, ChatwootError
 from chatwoot_mcp.config import Settings
+from chatwoot_mcp.confirmations import Confirmations
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
 TIER_READ = "tier:read"
 TIER_WRITE = "tier:write"
+TIER_ACTION = "tier:action"
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 SAFE_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
@@ -26,10 +28,17 @@ SAFE_IDEMPOTENT_WRITE = ToolAnnotations(
 )
 
 
+# Actions change things for customers or colleagues. "Destructive" means it overwrites what was there.
+ACTION_ADDS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+ACTION_OVERWRITES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+
+
 @dataclass(frozen=True)
 class ToolContext:
     client: ChatwootClient
     settings: Settings
+    confirmations: Confirmations
+    owner: Callable[[], str | None]  # a hash of the caller's key, or None when there is no key
 
 
 def reporting_errors(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:

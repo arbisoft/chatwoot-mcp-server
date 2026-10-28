@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server that lets an 
 
 It is a small [FastMCP v3](https://gofastmcp.com) program that sits next to Chatwoot and calls Chatwoot's existing HTTP API. **Chatwoot itself is not changed.** Every call is made with the caller's own Chatwoot key, so Chatwoot decides what each person may see and do.
 
-This is an early version: 27 tools, mostly read-only. See [What is not here yet](#what-is-not-here-yet).
+This is an early version: 34 tools. 24 only read, 3 make safe additions that cannot reach a customer, and 7 are actions that change things and always ask first. See [What is not here yet](#what-is-not-here-yet).
 
 ## Tools
 
@@ -41,12 +41,30 @@ Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; none can reach a custo
 | `add_conversation_labels` | Add labels to a chat. Existing labels stay; labels that do not exist are refused. |
 | `add_contact_labels` | The same for a customer. |
 
+Actions (only exist when `CHATWOOT_MCP_ENABLE_ACTIONS=true`; each one asks first, see [The confirm step](#the-confirm-step)):
+
+| Tool | Description |
+|---|---|
+| `send_reply` | Send a reply to the customer in a chat. Refused if the chat cannot be replied to. |
+| `assign_conversation` | Assign a chat to an agent, a team, or both. Replaces who it is assigned to now. |
+| `set_conversation_status` | Set a chat to open, pending, snoozed or resolved. Reopening also assigns it to the person who owns the key (Chatwoot's rule), and the preview says so. |
+| `set_conversation_priority` | Set a chat's priority: none, low, medium, high or urgent. |
+| `create_conversation` | Start a new chat with a customer in an inbox, optionally with a first message the customer receives. |
+| `create_contact` | Create a customer. Needs at least one of email, phone number or identifier. |
+| `update_contact` | Change a customer's name, email, phone number or identifier. |
+
 Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, so an assistant cannot move to another account.
 
 ## Two ways to run it
 
 - **stdio** (`chatwoot-mcp stdio`): one person, on their own machine, started by the MCP client. The key comes from `CHATWOOT_API_TOKEN`.
 - **http** (`chatwoot-mcp http`): hosted for many people. Each caller sends their own key as the `X-Chatwoot-Token` header to `/http/api-key/mcp`. `GET /healthz` is for health checks.
+
+## The confirm step
+
+An action never changes anything the first time you call it. The first call looks up what it would touch and returns a plain **preview** (who would get the message, what would change from and to) and a one-time `confirm_token`. The assistant is told to show the preview to the person and to call the tool again with the same arguments and the token only after they clearly agree.
+
+The token is tied to the person's key, the tool and the exact arguments, so it cannot be used by someone else, for another action, or after the request was edited. It works once and expires after `CHATWOOT_MCP_CONFIRM_TTL_SECONDS` (default 5 minutes). Tokens are kept in this process's memory, so run a single server process; several processes behind a load balancer would need shared storage.
 
 ## How the key is handled
 
@@ -57,7 +75,7 @@ Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, s
 
 ## Other safety habits
 
-- **Read-only by default.** The three write tools are not registered unless you switch them on.
+- **Read-only by default.** The three write tools need `CHATWOOT_MCP_ENABLE_WRITES=true` and the seven action tools need `CHATWOOT_MCP_ENABLE_ACTIONS=true`; otherwise they do not exist for the assistant.
 - **Customer text is marked untrusted.** Message text is wrapped in `<untrusted_content>` and the server tells the assistant to treat it as data, never as instructions. A closing tag typed by a customer is neutralised.
 - **Short replies.** Chatwoot's large payloads are reduced to the useful fields; lists and text are capped (`CHATWOOT_MCP_MAX_ITEMS`, `CHATWOOT_MCP_MAX_TEXT_CHARS`).
 - **No deleting, no settings, no user management, no platform API.**
@@ -120,5 +138,6 @@ The tests use a pretend Chatwoot and need no real server. See [CLAUDE.md](./CLAU
 ## What is not here yet
 
 - **Moneta login and per-user keys.** Hosted mode today expects each caller to bring their own Chatwoot key. Signing in with the Moneta login (Cognito) and getting a key made automatically for each person is planned, and would live in a separate `platform/` package.
-- **Tools that change things** (send a reply, assign, change status or priority, create or update a customer). They need a confirm step first.
-- **Chatwoot features outside support chats:** campaigns, help centre, automation, webhooks.
+- **Shared confirm storage** for running several server processes.
+- **Chatwoot features outside support chats:** campaigns, help centre, automation, webhooks, attachments, WhatsApp templates, the audit log, merging customers and creating labels.
+- **Deleting anything, and user, team or inbox management.** Left out on purpose.

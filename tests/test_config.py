@@ -75,3 +75,21 @@ def test_limits_can_be_changed():
 def test_timeout_must_be_between_zero_and_ten_minutes(value):
     with pytest.raises(ConfigError, match="CHATWOOT_MCP_TIMEOUT_SECONDS"):
         Settings.from_env(env(CHATWOOT_MCP_TIMEOUT_SECONDS=value))
+
+
+def test_actions_are_off_by_default_and_the_confirm_window_is_five_minutes():
+    s = Settings.from_env(env())
+    assert s.enable_actions is False and s.confirm_ttl_seconds == 300
+
+
+def test_actions_can_be_switched_on():
+    assert Settings.from_env(env(CHATWOOT_MCP_ENABLE_ACTIONS="true")).enable_actions is True
+    with pytest.raises(ConfigError, match="CHATWOOT_MCP_ENABLE_ACTIONS"):
+        Settings.from_env(env(CHATWOOT_MCP_ENABLE_ACTIONS="maybe"))
+
+
+@pytest.mark.parametrize("value", ["29", "3601", "soon", "0", "-5"])
+def test_the_confirm_window_must_be_between_thirty_seconds_and_an_hour(value):
+    with pytest.raises(ConfigError, match="CHATWOOT_MCP_CONFIRM_TTL_SECONDS"):
+        Settings.from_env(env(CHATWOOT_MCP_CONFIRM_TTL_SECONDS=value))
+    assert Settings.from_env(env(CHATWOOT_MCP_CONFIRM_TTL_SECONDS="60")).confirm_ttl_seconds == 60

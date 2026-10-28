@@ -39,15 +39,26 @@ CHATWOOT_BASE_URL=... CHATWOOT_ACCOUNT_ID=1 CHATWOOT_API_TOKEN=... python -m cha
   log, and is never sent anywhere else. The client sends no cookies and no `X-Auth-Request-*` headers and does not
   follow redirects. Do not add a way around any of these.
 - **No account id in tool arguments.** The account comes from `CHATWOOT_ACCOUNT_ID`.
-- **Writes are opt-in.** Write tools carry the tag `tier:write` and are registered only when
-  `CHATWOOT_MCP_ENABLE_WRITES=true`. A write tool must never be able to reach a customer without a confirm step
-  (that step does not exist yet, so there is no such tool). `add_private_note` checks Chatwoot marked the note private.
+- **Writes and actions are opt-in.** `tier:write` tools (private note, labels) are registered only when
+  `CHATWOOT_MCP_ENABLE_WRITES=true` and must never be able to reach a customer. `tier:action` tools (reply, assign,
+  status, priority, create chat, create or update customer) only when `CHATWOOT_MCP_ENABLE_ACTIONS=true`.
+  `add_private_note` checks Chatwoot marked the note private; `send_reply` checks it did not.
+- **Every action has two steps** (`gated()` in `tools/actions.py`). The first call changes nothing and returns a
+  preview plus a `confirm_token`; the second, with the same arguments and the token, does it. Tokens are tied to the
+  caller's key, the tool and the exact arguments, work once and expire (`confirmations.py`). Validate and look things
+  up *before* issuing a token, so a doomed action never gets one. Tokens live in memory, so one process only.
 - **Customer text is untrusted.** Wrap any text a customer or outsider wrote with `shaping.wrap_untrusted`.
 - **`get_my_profile` returns an allow-list of fields.** Chatwoot's profile holds access and pubsub tokens.
 - **Do not log request URLs** (`httpx` is set to WARNING in `__main__.py`): a customer search puts an email or phone
   in the URL.
 - **Every tool** has all four MCP annotation hints, one `tier:*` tag and one `module:*` tag, and raises `ToolError`
   with a plain message (via `@reporting_errors`) instead of leaking a traceback. `tests/test_server.py` checks this.
+
+## Adding an action
+
+Same as a tool, but use `ACTION_ADDS` (it only adds) or `ACTION_OVERWRITES` (it replaces what was there), tag it
+`TIER_ACTION`, and wrap it in `gated(...)` with a `build_preview` that reads what it would touch. Say in the preview
+anything Chatwoot does as a side effect (for example, reopening a chat assigns it to the acting agent).
 
 ## Adding a tool
 

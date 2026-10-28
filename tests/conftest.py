@@ -71,10 +71,10 @@ def make_client(chatwoot, make_settings):
     return build
 
 
-async def call(client: Client, name: str, **arguments: Any) -> Any:
+async def call(client: Client, tool: str, /, **arguments: Any) -> Any:
     """Call a tool; returns the structured result (a dict or list)."""
     async with client:
-        result = await client.call_tool(name, arguments)
+        result = await client.call_tool(tool, arguments)
     return result.data if result.data is not None else json.loads(result.content[0].text)
 
 

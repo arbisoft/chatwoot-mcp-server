@@ -17,5 +17,5 @@ def documented_tools() -> set[str]:
 
 
 async def test_the_readme_lists_exactly_the_tools_that_exist(make_client):
-    registered = await tool_names(make_client(CHATWOOT_MCP_ENABLE_WRITES="true"))
+    registered = await tool_names(make_client(CHATWOOT_MCP_ENABLE_WRITES="true", CHATWOOT_MCP_ENABLE_ACTIONS="true"))
     assert documented_tools() == registered

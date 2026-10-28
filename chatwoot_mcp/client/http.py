@@ -56,6 +56,9 @@ class ChatwootClient:
     async def post_account(self, path: str, body: Mapping[str, Any], *, version: int = 1) -> Any:
         return await self._request("POST", self._account_path(path, version), json=dict(body))
 
+    async def put_account(self, path: str, body: Mapping[str, Any], *, version: int = 1) -> Any:
+        return await self._request("PUT", self._account_path(path, version), json=dict(body))
+
     async def _request(
         self, method: str, path: str, *, params: Mapping[str, Any] | None = None, json: Any = None
     ) -> Any:

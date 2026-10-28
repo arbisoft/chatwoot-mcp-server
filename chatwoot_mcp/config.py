@@ -15,15 +15,17 @@ class ConfigError(ValueError):
     """A setting is missing or has an unusable value."""
 
 
-def _integer(env: Mapping[str, str], name: str, *, default: int | None, maximum: int | None = None) -> int:
+def _integer(
+    env: Mapping[str, str], name: str, *, default: int | None, minimum: int = 1, maximum: int | None = None
+) -> int:
     raw = env.get(name)
     if raw is None:
         if default is None:
             raise ConfigError(f"{name} is required")
         return default
-    if not re.fullmatch(r"[0-9]+", raw) or int(raw) < 1 or (maximum is not None and int(raw) > maximum):
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) < minimum or (maximum is not None and int(raw) > maximum):
         limit = f" and at most {maximum}" if maximum else ""
-        raise ConfigError(f"{name} must be a whole number of at least 1{limit}, got {raw!r}")
+        raise ConfigError(f"{name} must be a whole number of at least {minimum}{limit}, got {raw!r}")
     return int(raw)
 
 
@@ -54,6 +56,8 @@ class Settings:
     base_url: str
     account_id: int
     enable_writes: bool = False
+    enable_actions: bool = False
+    confirm_ttl_seconds: int = 300
     max_items: int = 25
     max_text_chars: int = 2000
     timeout_seconds: float = 30.0
@@ -67,6 +71,10 @@ class Settings:
             base_url=base_url,
             account_id=_integer(env, "CHATWOOT_ACCOUNT_ID", default=None),
             enable_writes=_flag(env, "CHATWOOT_MCP_ENABLE_WRITES"),
+            enable_actions=_flag(env, "CHATWOOT_MCP_ENABLE_ACTIONS"),
+            confirm_ttl_seconds=_integer(
+                env, "CHATWOOT_MCP_CONFIRM_TTL_SECONDS", default=300, minimum=30, maximum=3600
+            ),
             max_items=_integer(env, "CHATWOOT_MCP_MAX_ITEMS", default=25, maximum=100000),
             max_text_chars=_integer(env, "CHATWOOT_MCP_MAX_TEXT_CHARS", default=2000, maximum=100000),
             timeout_seconds=_seconds(env, "CHATWOOT_MCP_TIMEOUT_SECONDS", default=30.0, maximum=600.0),
