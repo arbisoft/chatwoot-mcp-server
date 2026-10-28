@@ -74,7 +74,10 @@ async def test_profile_and_v2_paths_are_not_account_scoped_the_same_way():
     client = make_client(handler)
     await client.get_profile()
     await client.get_account("/reports/summary", version=2)
-    assert seen == ["https://chat.example.com/api/v1/profile", "https://chat.example.com/api/v2/accounts/7/reports/summary"]
+    assert seen == [
+        "https://chat.example.com/api/v1/profile",
+        "https://chat.example.com/api/v2/accounts/7/reports/summary",
+    ]
 
 
 async def test_post_sends_json():
