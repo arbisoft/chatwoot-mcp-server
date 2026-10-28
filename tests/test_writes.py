@@ -76,3 +76,14 @@ async def test_writes_are_not_there_unless_switched_on(chatwoot, make_client):
     with pytest.raises(ToolError):
         await call(make_client(), "add_private_note", conversation_id=12, content="hi")
     assert chatwoot.requests == []
+
+
+async def test_adding_contact_labels_keeps_existing_ones_and_refuses_unknown_labels(chatwoot, make_client):
+    chatwoot.add("GET", f"{ACCOUNT}/labels", {"payload": [{"id": 1, "title": "vip"}, {"id": 2, "title": "refund"}]})
+    chatwoot.add("GET", f"{ACCOUNT}/contacts/4/labels", {"payload": ["vip"]})
+    chatwoot.add("POST", f"{ACCOUNT}/contacts/4/labels", {"payload": ["vip", "refund"]})
+    out = await call(make_client(**ON), "add_contact_labels", contact_id=4, labels=["refund"])
+    assert chatwoot.last_json() == {"labels": ["vip", "refund"]}
+    assert out == {"contact_id": 4, "labels": ["vip", "refund"]}
+    with pytest.raises(ToolError, match="do not exist: nope"):
+        await call(make_client(**ON), "add_contact_labels", contact_id=4, labels=["nope"])

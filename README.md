@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server that lets an 
 
 It is a small [FastMCP v3](https://gofastmcp.com) program that sits next to Chatwoot and calls Chatwoot's existing HTTP API. **Chatwoot itself is not changed.** Every call is made with the caller's own Chatwoot key, so Chatwoot decides what each person may see and do.
 
-This is the first version: 17 tools, mostly read-only. See [What is not here yet](#what-is-not-here-yet).
+This is an early version: 27 tools, mostly read-only. See [What is not here yet](#what-is-not-here-yet).
 
 ## Tools
 
@@ -18,18 +18,28 @@ Read (always available):
 | `get_conversation` | Open one chat: status, customer, assignee, team, labels, last message. |
 | `get_messages` | Read the messages in a chat. Customer text is wrapped in `<untrusted_content>`. |
 | `get_conversation_counts` | Count chats: yours, assigned, unassigned, all. |
+| `get_conversation_labels` | The labels on one chat. |
 | `search_contacts` | Find customers by name, email, phone or identifier. |
 | `get_contact` | Open one customer. |
+| `list_contacts` | Browse customers, 15 per page, optionally by label. |
+| `get_contact_labels` | The labels on one customer. |
 | `get_contact_conversations` | All chats one customer has had. |
 | `list_inboxes` / `list_agents` / `list_teams` / `list_labels` / `list_canned_responses` | Small lists of names and ids the assistant needs for the other tools. |
+| `get_inbox` | One inbox's settings (greeting, working hours, auto-assignment). Never its webhook address or secrets. |
+| `list_team_members` | The agents in one team. |
+| `list_custom_attribute_definitions` | The custom fields defined for chats or customers, with their allowed values. |
+| `get_account` | The account's name, language, status and support address. No billing or settings. |
 | `get_report_summary` | Chat counts, reply and resolution times and satisfaction scores for a period, with the period before for comparison. |
+| `get_report_by_group` | The same kind of numbers split by agent, team, inbox, label or channel. |
+| `get_first_response_distribution` | How quickly first replies went out, in time bands, per channel. |
 
-Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; neither can reach a customer):
+Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; none can reach a customer):
 
 | Tool | Description |
 |---|---|
 | `add_private_note` | Add an internal note to a chat. Refuses to report success if Chatwoot did not mark it private. |
 | `add_conversation_labels` | Add labels to a chat. Existing labels stay; labels that do not exist are refused. |
+| `add_contact_labels` | The same for a customer. |
 
 Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, so an assistant cannot move to another account.
 
@@ -47,7 +57,7 @@ Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, s
 
 ## Other safety habits
 
-- **Read-only by default.** The two write tools are not registered unless you switch them on.
+- **Read-only by default.** The three write tools are not registered unless you switch them on.
 - **Customer text is marked untrusted.** Message text is wrapped in `<untrusted_content>` and the server tells the assistant to treat it as data, never as instructions. A closing tag typed by a customer is neutralised.
 - **Short replies.** Chatwoot's large payloads are reduced to the useful fields; lists and text are capped (`CHATWOOT_MCP_MAX_ITEMS`, `CHATWOOT_MCP_MAX_TEXT_CHARS`).
 - **No deleting, no settings, no user management, no platform API.**

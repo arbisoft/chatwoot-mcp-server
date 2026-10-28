@@ -51,3 +51,25 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             **page_info(1, cut, shown),
             "conversations": [shaping.compact_conversation(c, text_limit) for c in items],
         }
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:contacts"})
+    @reporting_errors
+    async def list_contacts(
+        page: Annotated[int, Field(ge=1, description="Page number, starting at 1.")] = 1,
+        labels: Annotated[list[str] | None, Field(description="Only customers with any of these labels.")] = None,
+    ) -> dict[str, Any]:
+        """Browse customers, 15 per page. To find a particular customer use search_contacts."""
+        data = await ctx.client.get_account("/contacts", params={"page": page, "labels": labels})
+        items, cut = shaping.limit_items(data.get("payload") if isinstance(data, dict) else None, shown)
+        return {
+            **page_info(page, cut, shown),
+            "meta": data.get("meta") if isinstance(data, dict) else None,
+            "contacts": [shaping.compact_contact(c) for c in items],
+        }
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:contacts"})
+    @reporting_errors
+    async def get_contact_labels(contact_id: ContactId) -> dict[str, Any]:
+        """List the labels on one customer."""
+        data = await ctx.client.get_account(f"/contacts/{contact_id}/labels")
+        return {"contact_id": contact_id, "labels": (data.get("payload") if isinstance(data, dict) else None) or []}

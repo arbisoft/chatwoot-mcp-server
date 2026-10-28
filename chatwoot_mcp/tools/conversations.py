@@ -111,3 +111,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         params = {"status": status, "inbox_id": inbox_id, "team_id": team_id, "labels": labels}
         data = await ctx.client.get_account("/conversations/meta", params=params)
         return (data.get("meta") if isinstance(data, dict) else None) or {}
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
+    @reporting_errors
+    async def get_conversation_labels(conversation_id: ConversationId) -> dict[str, Any]:
+        """List the labels on one chat."""
+        data = await ctx.client.get_account(f"/conversations/{conversation_id}/labels")
+        return {
+            "conversation_id": conversation_id,
+            "labels": (data.get("payload") if isinstance(data, dict) else None) or [],
+        }

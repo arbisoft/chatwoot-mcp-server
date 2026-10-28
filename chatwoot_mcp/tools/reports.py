@@ -9,10 +9,14 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
+from chatwoot_mcp import shaping
 from chatwoot_mcp.tools.support import READ_ONLY, TIER_READ, ToolContext, reporting_errors
 
 ReportType = Literal["account", "agent", "inbox", "label", "team"]
+GroupBy = Literal["agent", "team", "inbox", "label", "channel"]
 MAX_DAYS = 366
+# Chatwoot refuses a channel report longer than six calendar months (6.months = 15,778,476 seconds).
+CHANNEL_MAX_SECONDS = 15_778_476
 
 
 def day_range(since: str, until: str) -> tuple[int, int]:
@@ -53,4 +57,38 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         start, end = day_range(since, until)
         params = {"type": type, "id": id, "since": start, "until": end, "business_hours": business_hours}
         data = await ctx.client.get_account("/reports/summary", params=params, version=2)
+        return data if isinstance(data, dict) else {"result": data}
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
+    @reporting_errors
+    async def get_report_by_group(
+        group_by: Annotated[GroupBy, Field(description="Split the numbers by agent, team, inbox, label or channel.")],
+        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
+        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+        business_hours: Annotated[bool, Field(description="Count only business hours.")] = False,
+    ) -> dict[str, Any]:
+        """Compare agents, teams, inboxes, labels or channels: chats handled, reply and resolution times."""
+        start, end = day_range(since, until)
+        if group_by == "channel" and end - start > CHANNEL_MAX_SECONDS:
+            raise ToolError("The channel report covers at most six months. Choose a shorter period.")
+        params = {"since": start, "until": end, "business_hours": business_hours}
+        data = await ctx.client.get_account(f"/summary_reports/{group_by}", params=params, version=2)
+        if not isinstance(data, list):
+            return data if isinstance(data, dict) else {"rows": []}
+        rows, cut = shaping.limit_items(data, ctx.settings.max_items)
+        out: dict[str, Any] = {"rows": rows}
+        if cut:
+            out["truncated"] = f"Only the first {ctx.settings.max_items} rows are shown."
+        return out
+
+    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
+    @reporting_errors
+    async def get_first_response_distribution(
+        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
+        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+    ) -> dict[str, Any]:
+        """Show how quickly first replies went out, in time bands, for each channel."""
+        start, end = day_range(since, until)
+        params = {"since": start, "until": end}
+        data = await ctx.client.get_account("/reports/first_response_time_distribution", params=params, version=2)
         return data if isinstance(data, dict) else {"result": data}
