@@ -19,7 +19,13 @@ class ChatwootError(Exception):
         self.status = status
 
 
+# Chatwoot answers 401 both for a bad key and for a role that may not do something; only the text differs.
+_NOT_ALLOWED_401 = "You are not authorized to do this action"
+
+
 def error_for_status(status: int, body: object) -> ChatwootError:
+    if status == 401 and _reason(body) == _NOT_ALLOWED_401:
+        return ChatwootError(_BY_STATUS[403], status)
     if status in _BY_STATUS:
         return ChatwootError(_BY_STATUS[status], status)
     if status == 422:

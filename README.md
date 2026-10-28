@@ -47,7 +47,7 @@ Actions (only exist when `CHATWOOT_MCP_ENABLE_ACTIONS=true`; each one asks first
 |---|---|
 | `send_reply` | Send a reply to the customer in a chat. Refused if the chat cannot be replied to. |
 | `assign_conversation` | Assign a chat to an agent, a team, or both. Replaces who it is assigned to now. |
-| `set_conversation_status` | Set a chat to open, pending, snoozed or resolved. Reopening also assigns it to the person who owns the key (Chatwoot's rule), and the preview says so. |
+| `set_conversation_status` | Set a chat to open, pending, snoozed or resolved. Reopening also assigns it to the person who owns the key when their role is agent (Chatwoot's rule), and the preview says so. |
 | `set_conversation_priority` | Set a chat's priority: none, low, medium, high or urgent. |
 | `create_conversation` | Start a new chat with a customer in an inbox, optionally with a first message the customer receives. |
 | `create_contact` | Create a customer. Needs at least one of email, phone number or identifier. |

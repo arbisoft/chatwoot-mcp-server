@@ -93,6 +93,15 @@ async def test_post_sends_json():
     assert seen[0].read() == b'{"content":"hi","private":true}'
 
 
+async def test_a_401_for_a_role_that_may_not_do_it_says_so_instead_of_blaming_the_key():
+    def handler(request):
+        return httpx.Response(401, json={"error": "You are not authorized to do this action"})
+
+    with pytest.raises(ChatwootError, match="not allowed for your key") as caught:
+        await make_client(handler).get_account("/labels")
+    assert caught.value.status == 401
+
+
 @pytest.mark.parametrize(
     ("status", "needle"),
     [

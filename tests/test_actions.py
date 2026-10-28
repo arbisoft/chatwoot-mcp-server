@@ -245,7 +245,7 @@ async def test_reopening_warns_that_chatwoot_assigns_the_chat_to_the_acting_agen
     conversation_routes(chatwoot, status="resolved")
     out = await preview(make_client(**ON), "set_conversation_status", conversation_id=12, status="open")
     assert out["preview"]["from"] == "resolved" and out["preview"]["to"] == "open"
-    assert "assigns the chat to the person who owns this key" in out["preview"]["side_effect"]
+    assert "has the agent role (not administrator), Chatwoot also assigns" in out["preview"]["side_effect"]
 
 
 async def test_resolving_has_no_side_effect_warning(chatwoot, make_client):

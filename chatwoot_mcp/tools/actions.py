@@ -242,8 +242,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 preview["until"] = snoozed_until
             if status == "open":
                 preview["side_effect"] = (
-                    "Chatwoot also assigns the chat to the person who owns this key, if they are an agent, "
-                    "replacing the current assignee."
+                    "If the person who owns this key has the agent role (not administrator), Chatwoot also assigns "
+                    "the chat to them, replacing the current assignee."
                 )
             return preview
 
