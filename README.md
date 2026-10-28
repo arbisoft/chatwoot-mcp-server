@@ -1,1 +1,0 @@
-# chatwoot-mcp-server
