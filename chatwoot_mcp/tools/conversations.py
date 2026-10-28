@@ -89,12 +89,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         data = await ctx.client.get_account(f"/conversations/{conversation_id}/messages", params=params)
         items, cut = shaping.limit_items(data.get("payload") if isinstance(data, dict) else None, shown)
         meta = data.get("meta", {}) if isinstance(data, dict) else {}
-        return {
+        out: dict[str, Any] = {
             "conversation_id": conversation_id,
             "labels": meta.get("labels") or [],
             "messages": [shaping.compact_message(m, text_limit) for m in items],
-            **({"truncated": f"Only the first {shown} messages are shown. Use `after` to continue."} if cut else {}),
         }
+        if cut:
+            last_id = items[-1].get("id")
+            out["truncated"] = f"Only the first {shown} messages are shown. Call again with after={last_id}."
+        return out
 
     @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:conversations"})
     @reporting_errors

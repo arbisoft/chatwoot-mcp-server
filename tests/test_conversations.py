@@ -161,3 +161,11 @@ async def test_conversation_ids_must_be_positive(chatwoot, make_client, bad):
     with pytest.raises(ToolError):
         await call(make_client(), "get_conversation", conversation_id=bad)
     assert chatwoot.requests == []
+
+
+async def test_get_messages_that_are_cut_say_which_message_to_continue_from(chatwoot, make_client):
+    rows = [{"id": 100 + i, "content": f"m{i}", "message_type": 0} for i in range(5)]
+    chatwoot.add("GET", f"{ACCOUNT}/conversations/12/messages", {"meta": {}, "payload": rows})
+    out = await call(make_client(CHATWOOT_MCP_MAX_ITEMS="3"), "get_messages", conversation_id=12)
+    assert [m["id"] for m in out["messages"]] == [100, 101, 102]
+    assert "after=102" in out["truncated"]
