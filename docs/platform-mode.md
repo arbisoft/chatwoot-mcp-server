@@ -120,14 +120,14 @@ Without `MCP_OAUTH_STORAGE_URL` everything lives in process: it is lost on resta
 | `OIDC_CLIENT_ID` | required | Cognito app client id |
 | `OIDC_CLIENT_SECRET` | | Cognito app client secret (confidential client); also the encryption key material |
 | `MCP_JWT_SIGNING_KEY` | | Signing key for public (PKCE) clients; needed when there is no client secret |
-| `MCP_BASE_URL` | required | Public URL of this server, e.g. `https://support-mcp.example.com` |
+| `MCP_BASE_URL` | required | Public URL of this server, e.g. `https://chat-mcp.foss.arbisoft.com` |
 | `CHATWOOT_INTERNAL_BASE_URL` | required | Chatwoot on the internal network, e.g. `http://chatwoot-web:3000`; every Chatwoot call goes here |
 | `CHATWOOT_ACCOUNT_ID` | required | The account the tools work in |
 | `DEFAULT_EMAIL_DOMAIN` | required | Synthetic domain of unverified users (a bare domain) |
 | `LAUNCHPAD_EMAIL_CAPTURE` | `false` | Set it to the platform's value. `true` refuses unverified users (see above) |
 | `CHATWOOT_PUBLIC_URL` | `CHATWOOT_URL` | Base URL for the `url` links in results |
-| `MCP_OAUTH_STORAGE_URL` | unset | Valkey URL for OAuth state, the key cache and confirmations |
-| `MCP_ALLOWED_CLIENT_REDIRECT_URIS` | built-in list | Comma-separated redirect URI patterns (fnmatch) added to the built-in list (`DEFAULT_REDIRECT_URIS` in `platform/settings.py`: localhost, Cursor, VS Code, Claude.ai, ChatGPT, Gemini), e.g. Askii's callback |
+| `MCP_OAUTH_STORAGE_URL` | unset | Valkey URL for OAuth state, the key cache and confirmations; `valkey://valkey:6379/3` on the Moneta bundle |
+| `MCP_ALLOWED_CLIENT_REDIRECT_URIS` | built-in list | Comma-separated redirect URI patterns (fnmatch) added to the built-in list (`DEFAULT_REDIRECT_URIS` in `platform/settings.py`: localhost, Cursor, VS Code, Claude.ai, ChatGPT, Gemini, Askii at `https://askii.moneta.dev/*`) |
 | `MCP_ALLOW_ANY_REDIRECT_URI` | `false` | `true` accepts any redirect URI, with a startup warning |
 | `COGNITO_UPSTREAM_AUTH_URL` | discovered | Send users to an auth proxy's `/authorize` instead of Cognito's hosted UI |
 | `COGNITO_UPSTREAM_TOKEN_URL` | discovered | Exchange codes through an auth proxy's `/token` |
@@ -148,3 +148,18 @@ The community settings (`CHATWOOT_ENABLE_*`, `CHATWOOT_READ_ONLY`, timeouts, `MC
 - Any container on the internal network can send `X-Auth-Request-Email` to Chatwoot directly. That exposure exists
   without this server; keep the internal URL off untrusted networks.
 - Logs never contain keys, session headers or bodies; cache keys are hashes of the identity.
+
+## On the Moneta bundle
+
+The values this server is set up for, following the other platform MCP servers (`pm-mcp`, `docs-mcp`, `design-mcp`,
+`support-mcp`):
+
+| What | Value |
+|---|---|
+| Address | `https://chat-mcp.<platform-domain>`, port `8215` in the container |
+| Cognito callback to register | `https://chat-mcp.<platform-domain>/auth/callback` |
+| Router middlewares | `strip-auth-headers@docker` only: no `mpass-auth@docker`, FastMCP is the login |
+| Storage | `MCP_OAUTH_STORAGE_URL=valkey://valkey:6379/3` (2 and 5 to 14 are claimed, see `launchpad-api` `src/config.py`) |
+| Chatwoot | `CHATWOOT_INTERNAL_BASE_URL` on the internal network; Chatwoot runs with `AUTH_TYPE=SSO` and `DEFAULT_EMAIL_DOMAIN` |
+| Email capture | `LAUNCHPAD_EMAIL_CAPTURE` set to the platform's value (`false` today) |
+

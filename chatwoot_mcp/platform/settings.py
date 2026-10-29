@@ -34,6 +34,8 @@ DEFAULT_REDIRECT_URIS = (
     "https://chatgpt.com/connector/oauth/*",
     "https://chatgpt.com/connector_platform_oauth_redirect",
     "https://oauth-redirect.googleusercontent.com/r/*",
+    # Askii, Moneta's own assistant (the address surfsense-mcp-server's example allows).
+    "https://askii.moneta.dev/*",
 )
 REQUIRED = (
     "MCP_BASE_URL",
