@@ -96,11 +96,20 @@ async def test_a_reset_key_is_fetched_again_once(chatwoot, store, clock):
 
 
 @pytest.mark.parametrize("email", ["sid-123@askii.ai", "sid-123"])
-async def test_an_unverified_identity_is_refused_before_any_request(chatwoot, store, clock, email):
+async def test_with_email_capture_on_an_unverified_identity_is_refused_before_any_request(
+    chatwoot, store, clock, email
+):
     identity = Identity(email=email, claims={"cognito:username": "sid-123"})
     with pytest.raises(SyntheticIdentityError, match="verify your email"):
-        await minter_for(chatwoot, store, clock).token_for(identity)
+        await minter_for(chatwoot, store, clock, require_verified_email=True).token_for(identity)
     assert chatwoot.requests == [] and chatwoot.created_users == []
+
+
+@pytest.mark.parametrize("email", ["sid-123@askii.ai", "sid-123"])
+async def test_with_email_capture_off_an_unverified_identity_gets_the_web_logins_account(chatwoot, store, clock, email):
+    identity = Identity(email=email, claims={"cognito:username": "sid-123"})
+    await minter_for(chatwoot, store, clock).token_for(identity)
+    assert [r.headers["x-auth-request-email"] for r in chatwoot.requests[:1]] == [email]
 
 
 async def test_the_corporate_gate_refuses_and_drops_the_cache(store, clock):

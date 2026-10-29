@@ -55,10 +55,18 @@ those.
 
 The identity is the id_token's `email` (lowercased), or `cognito:username` when there is no email. An unverified
 platform user carries exactly `<cognito:username>@<DEFAULT_EMAIL_DOMAIN>`, and Chatwoot's `Mpass::ProxyIdentity`
-turns a value without `@` into `<value>@DEFAULT_EMAIL_DOMAIN`. The server refuses both shapes before sending anything
-to Chatwoot, because the first request would create that user, and tells the user to verify their email in the portal
-first. Any other address in that domain is accepted only from a token mpass-auth-proxy's email overlay stamped
-(`preferred_username == cognito:username`).
+turns a value without `@` into `<value>@DEFAULT_EMAIL_DOMAIN`.
+
+What happens to those users follows `LAUNCHPAD_EMAIL_CAPTURE`, the same setting mpass-auth-proxy and the launchpad
+read:
+
+- **Off** (the default, and the platform today): every user has the synthetic address, and it is the account the
+  web login uses too. The server hands it to Chatwoot like any other identity.
+- **On**: the launchpad verify-gate holds unverified users at the edge until their app accounts are relinked to the
+  verified address. The MCP does not pass the edge, so it refuses both shapes before sending anything to Chatwoot
+  and tells the user to verify their email in the portal first; otherwise its first request would create the
+  duplicate account the relink later collides with. Any other address in that domain is accepted only from a token
+  mpass-auth-proxy's email overlay stamped (`preferred_username == cognito:username`).
 
 ## Cache, re-checks and role changes
 
@@ -115,7 +123,8 @@ Without `MCP_OAUTH_STORAGE_URL` everything lives in process: it is lost on resta
 | `MCP_BASE_URL` | required | Public URL of this server, e.g. `https://support-mcp.example.com` |
 | `CHATWOOT_INTERNAL_BASE_URL` | required | Chatwoot on the internal network, e.g. `http://chatwoot-web:3000`; every Chatwoot call goes here |
 | `CHATWOOT_ACCOUNT_ID` | required | The account the tools work in |
-| `DEFAULT_EMAIL_DOMAIN` | required | Synthetic domain of unverified users (a bare domain); `<cognito:username>@` it is refused |
+| `DEFAULT_EMAIL_DOMAIN` | required | Synthetic domain of unverified users (a bare domain) |
+| `LAUNCHPAD_EMAIL_CAPTURE` | `false` | Set it to the platform's value. `true` refuses unverified users (see above) |
 | `CHATWOOT_PUBLIC_URL` | `CHATWOOT_URL` | Base URL for the `url` links in results |
 | `MCP_OAUTH_STORAGE_URL` | unset | Valkey URL for OAuth state, the key cache and confirmations |
 | `MCP_ALLOWED_CLIENT_REDIRECT_URIS` | built-in list | Comma-separated redirect URI patterns (fnmatch) added to the built-in list (`DEFAULT_REDIRECT_URIS` in `platform/settings.py`: localhost, Cursor, VS Code, Claude.ai, ChatGPT, Gemini), e.g. Askii's callback |

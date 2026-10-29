@@ -87,6 +87,7 @@ class PlatformSettings:
     log_level: str = "INFO"
     production: bool = False
     http_api_key_route: bool = False
+    email_capture: bool = False
 
     @property
     def key_material(self) -> str:
@@ -149,6 +150,7 @@ class PlatformSettings:
             log_level=log_level if log_level in LOG_LEVELS else "INFO",
             production=_read(env, "MCP_ENV").lower() == "production",
             http_api_key_route=env_flag("CHATWOOT_HTTP_API_KEY_ROUTE", environ=env),
+            email_capture=env_flag("LAUNCHPAD_EMAIL_CAPTURE", environ=env),
         )
 
 

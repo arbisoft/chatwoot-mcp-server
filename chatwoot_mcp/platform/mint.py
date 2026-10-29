@@ -338,12 +338,14 @@ class TokenMinter:
         *,
         account_id: int,
         default_email_domain: str,
+        require_verified_email: bool = False,
         clock: Clock = time.time,
     ) -> None:
         self._endpoint = endpoint
         self._cache = cache
         self._account_id = account_id
         self._default_email_domain = default_email_domain
+        self._require_verified_email = require_verified_email
         self._clock = clock
         self._locks = KeyedLocks()
 
@@ -352,7 +354,10 @@ class TokenMinter:
         return len(self._locks)
 
     def _refuse_synthetic(self, identity: Identity) -> None:
-        if identity.is_synthetic(self._default_email_domain):
+        # With email capture off every user has the synthetic address, and it is the same account the web login
+        # uses. With it on, the launchpad verify-gate holds unverified users at the edge; the MCP skips the edge,
+        # so it holds them here, or it would create the duplicate account the relink later collides with.
+        if self._require_verified_email and identity.is_synthetic(self._default_email_domain):
             _audit("key.refused", identity, reason="synthetic")
             raise SyntheticIdentityError()
 

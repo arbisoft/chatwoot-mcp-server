@@ -122,6 +122,7 @@ def build_platform_server(
         TokenCache(store, fernet_for(platform.key_material, CACHE_SALT), namespace=platform.namespace),
         account_id=settings.account_id,
         default_email_domain=platform.default_email_domain,
+        require_verified_email=platform.email_capture,
     )
     credentials = MintedCredentialProvider(minter)
     client = ChatwootClient(
@@ -241,7 +242,7 @@ def configure_logging(level: str) -> None:
 def _log_startup(settings: Settings, platform: PlatformSettings) -> None:
     logger.info(
         "platform mode: pool=%s region=%s client_id=%s base_url=%s scopes=%s redirect_allowlist=%s secret=%s "
-        "storage=%s chatwoot_internal=%s chatwoot_public=%s",
+        "storage=%s email_capture=%s chatwoot_internal=%s chatwoot_public=%s",
         platform.user_pool_id,
         platform.aws_region,
         platform.client_id,
@@ -250,6 +251,7 @@ def _log_startup(settings: Settings, platform: PlatformSettings) -> None:
         platform.redirect_allowlist,
         "set" if platform.client_secret else "unset",
         "valkey" if platform.storage_url else "memory",
+        platform.email_capture,
         settings.chatwoot_url,
         settings.browser_url,
     )

@@ -63,6 +63,7 @@ def test_settings_read_the_platform_env():
             "MCP_LOG_LEVEL": "debug",
             "MCP_ALLOWED_ORIGINS": "https://a.test,https://b.test",
             "MCP_ENV": "Production",
+            "LAUNCHPAD_EMAIL_CAPTURE": "true",
         }
     )
 
@@ -76,6 +77,7 @@ def test_settings_read_the_platform_env():
     assert settings.cors_origins == ("https://a.test", "https://b.test")
     assert settings.production is True
     assert settings.http_api_key_route is False
+    assert settings.email_capture is True
     assert settings.key_material == "cognito-app-secret"
     assert "cognito-app-secret" not in repr(settings)
 
@@ -90,6 +92,7 @@ def test_settings_defaults():
     assert settings.access_token_ttl_seconds == DEFAULT_ACCESS_TOKEN_TTL_SECONDS
     assert settings.cors_origins == ("*",)
     assert settings.log_level == "INFO"
+    assert settings.email_capture is False
     assert settings.http_api_key_route is False
     assert settings.key_material == "k"
 
