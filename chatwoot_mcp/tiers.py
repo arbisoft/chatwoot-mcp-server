@@ -1,0 +1,122 @@
+"""Who a tool is for, and the ``auth=`` check that hides it from everyone else.
+
+Each tool declares the lowest tier it needs as a tag (``tier:agent`` or ``tier:admin``). :func:`require_tier`
+builds one FastMCP ``AuthCheck`` that reads that tag and compares it with the caller's tier, which comes from the
+``permissions`` Chatwoot lists for the configured account in ``GET /api/v1/profile``:
+
+- ``administrator``, or an Enterprise custom role holding ``report_manage`` (which Chatwoot lets read reports):
+  ``ADMIN``. Only report tools need it.
+- ``agent``, or any other custom role: ``AGENT``.
+- No membership in the configured account: ``NONE``, which leaves only ``get_me``.
+
+FastMCP facts this relies on: a check receives ``AuthContext(token, component)`` and may be async; it runs for
+``tools/list``, ``get_tool`` and ``tools/call``, and a denied tool is left out of the list and reported as unknown
+when called; on stdio FastMCP skips every check; any exception other than ``AuthorizationError`` is logged and
+treated as a denial, so the resolver must never raise.
+
+The filter is a convenience for the model. Chatwoot still enforces every permission on every call.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable, Iterable
+from enum import IntEnum
+from typing import TYPE_CHECKING
+
+from fastmcp.server.auth import AuthCheck, AuthContext
+
+from chatwoot_mcp.client.errors import ChatwootError
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth import AccessToken
+
+    from chatwoot_mcp.credentials.base import CredentialProvider
+
+logger = logging.getLogger(__name__)
+
+TIER_TAG_PREFIX = "tier:"
+ADMIN_PERMISSIONS = frozenset({"administrator", "report_manage"})
+
+
+class Tier(IntEnum):
+    """``NONE`` is a key whose owner is not a member of the configured account."""
+
+    NONE = 0
+    AGENT = 1
+    ADMIN = 2
+
+    @property
+    def label(self) -> str:
+        return {Tier.NONE: "not a member of this Chatwoot account", Tier.AGENT: "an agent"}.get(
+            self, "an administrator"
+        )
+
+    @property
+    def tag(self) -> str:
+        return f"{TIER_TAG_PREFIX}{self.name.lower()}"
+
+
+TierResolver = Callable[["AccessToken | None"], Awaitable[Tier | None]]
+
+
+def tier_for(permissions: Iterable[str] | None) -> Tier:
+    """``None`` means the owner has no membership in the configured account."""
+    if permissions is None:
+        return Tier.NONE
+    held = frozenset(permissions)
+    return Tier.ADMIN if held & ADMIN_PERMISSIONS else Tier.AGENT
+
+
+_TIERS_BY_TAG = {tier.tag: tier for tier in Tier}
+
+
+def required_tier(tags: Iterable[str]) -> Tier | None:
+    return max((_TIERS_BY_TAG[tag] for tag in tags if tag in _TIERS_BY_TAG), default=None)
+
+
+def tier_allows(caller: Tier | None, needed: Tier | None) -> bool:
+    return needed is None or caller is None or caller >= needed
+
+
+def require_tier(resolver: TierResolver) -> AuthCheck:
+    """Build the ``auth=`` check shared by every tool.
+
+    An unknown caller tier (``None``) means "do not filter", and so does a resolver that fails: FastMCP would read
+    an exception as a denial and blank the tool list.
+    """
+
+    async def check(ctx: AuthContext) -> bool:
+        needed = required_tier(ctx.component.tags)
+        if needed is None:
+            return True
+        try:
+            caller = await resolver(ctx.token)
+        except Exception:
+            logger.warning("tier resolver failed; showing the tool unfiltered", exc_info=True)
+            caller = None
+        return tier_allows(caller, needed)
+
+    return check
+
+
+async def no_filtering(_token: AccessToken | None) -> Tier | None:
+    return None
+
+
+def credential_tier_resolver(credentials: CredentialProvider) -> TierResolver:
+    async def resolve(_token: AccessToken | None) -> Tier | None:
+        try:
+            return (await credentials.resolve()).tier
+        except ChatwootError:
+            return None
+        except Exception:
+            logger.warning("could not resolve the caller's tier; showing every tool", exc_info=True)
+            return None
+
+    return resolve
+
+
+def community_tier_resolver(credentials: CredentialProvider, *, filter_by_role: bool) -> TierResolver:
+    """Community mode shows every tool unless ``CHATWOOT_FILTER_TOOLS_BY_ROLE`` is on."""
+    return credential_tier_resolver(credentials) if filter_by_role else no_filtering

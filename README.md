@@ -1,153 +1,180 @@
 # Chatwoot MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that lets an AI assistant (Claude Desktop, Claude Code, Cursor, MCP Inspector, ...) read and triage support chats in [Chatwoot](https://www.chatwoot.com).
+A [Model Context Protocol](https://modelcontextprotocol.io) server for [Chatwoot](https://www.chatwoot.com) support
+conversations. It lets Claude, or any MCP client, read and work on chats, customers and reports using **the caller's
+own Chatwoot permissions**: every request carries the caller's own Chatwoot key, never a shared admin key, so
+Chatwoot itself decides what each user can see and change.
 
-It is a small [FastMCP v3](https://gofastmcp.com) program that sits next to Chatwoot and calls Chatwoot's existing HTTP API. **Chatwoot itself is not changed.** Every call is made with the caller's own Chatwoot key, so Chatwoot decides what each person may see and do.
+It lives in `mcp/` inside the Chatwoot fork but is its own Python project and never imports from the Rails app.
+Every tool calls an API route Chatwoot already has; nothing in Chatwoot is changed.
 
-This is an early version: 44 tools. 30 only read, 5 make safe changes that cannot reach a customer, and 9 are actions that change things and always ask first. See [What is not here yet](#what-is-not-here-yet).
+Status: 47 tools in stdio and HTTP. Replies and macros are available behind opt-in flags. Platform mode (Moneta SSO,
+each user's own key fetched automatically) is available.
+
+## Modes
+
+### Community mode
+
+- **stdio**: for one person on their own machine. The MCP client starts `chatwoot-mcp stdio` and the server uses the
+  key in `CHATWOOT_HTTP_TOKEN` (Chatwoot: Profile Settings, Access Token).
+- **http**: hosted. Each caller sends their own key as `X-Chatwoot-Token` to `/http/api-key/mcp`; any
+  `X-Auth-Request-*` header they send is dropped on arrival. `/mcp` with a shared `CHATWOOT_HTTP_TOKEN` is only
+  served with `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE=true`, because anyone who reaches it acts as that key's owner.
+
+### Platform mode
+
+`chatwoot-mcp http` with `COGNITO_USER_POOL_ID` set. MCP clients sign in through Moneta (AWS Cognito, OAuth 2.0
+with dynamic client registration) and nobody pastes a key: the server fetches each user's own Chatwoot key through
+Chatwoot's existing SSO handoff on the internal network, caches it encrypted, and re-checks it every four hours. It
+needs the `[platform]` extra and Chatwoot running with `AUTH_TYPE=SSO`. See [docs/platform-mode.md](docs/platform-mode.md).
+
+## Quick start
+
+```bash
+cd mcp
+uv sync --all-extras
+CHATWOOT_URL=https://chat.example.com CHATWOOT_ACCOUNT_ID=1 CHATWOOT_HTTP_TOKEN=... uv run chatwoot-mcp stdio
+```
+
+Claude Code (`.mcp.json`) or Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "chatwoot": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/chatwoot/mcp", "run", "chatwoot-mcp", "stdio"],
+      "env": { "CHATWOOT_URL": "https://chat.example.com", "CHATWOOT_ACCOUNT_ID": "1", "CHATWOOT_HTTP_TOKEN": "..." }
+    }
+  }
+}
+```
+
+Hosted:
+
+```bash
+CHATWOOT_URL=http://chatwoot-web:3000 CHATWOOT_ACCOUNT_ID=1 MCP_HTTP_HOST=0.0.0.0 uv run chatwoot-mcp http
+# Each MCP client then connects to http://<host>:8214/http/api-key/mcp with the header X-Chatwoot-Token: <their key>
+```
+
+Docker: `docker build -t chatwoot-mcp-server mcp/`, then run it with the same variables (the image serves `http`).
+
+## Configuration
+
+Settings are read once at start-up; a bad value stops the server with a plain message. `.env.example` lists them.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CHATWOOT_URL` | required | Chatwoot's address, no path. Hosted next to Chatwoot, use its internal address |
+| `CHATWOOT_ACCOUNT_ID` | required | The one account the tools work in. Tools never take an account id |
+| `CHATWOOT_HTTP_TOKEN` | | The key for stdio, or for `/mcp` with the shared-key opt-in |
+| `CHATWOOT_PUBLIC_URL` | `CHATWOOT_URL` | Base URL for the `url` links in results |
+| `CHATWOOT_READ_ONLY` | `false` | `true` registers no tool that changes anything |
+| `CHATWOOT_ENABLE_<MODULE>` | on, except `REPLIES` and `MACROS` | Turn a tool module on or off (see the `module` column below) |
+| `CHATWOOT_FILTER_TOOLS_BY_ROLE` | `false` | Hide tools the key's role cannot use (reports for agents). Platform mode always filters |
+| `CHATWOOT_CONFIRM_TTL_SECONDS` | `600` | How long a confirmation token from a `prepare_*` tool stays valid |
+| `CHATWOOT_MAX_ITEMS` | `25` | Most items a list returns |
+| `CHATWOOT_MAX_TEXT_CHARS` | `2000` | Characters of message, note or article text kept |
+| `CHATWOOT_TIMEOUT_SECONDS` / `CHATWOOT_CONNECT_TIMEOUT_SECONDS` | `30` / `10` | Chatwoot timeouts |
+| `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE` | `false` | Serve `/mcp` with `CHATWOOT_HTTP_TOKEN` in http mode |
+| `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | `127.0.0.1` / `8214` | Where http mode listens (the Docker image sets `0.0.0.0`) |
+| `MCP_LOG_LEVEL` | `INFO` | Logs go to stderr; request URLs are never logged |
+
+Platform mode adds its own settings; see [docs/platform-mode.md](docs/platform-mode.md#configuration).
 
 ## Tools
 
-Read (always available):
+Every tool carries all four MCP annotation hints and returns an `Error: ...` string instead of raising. Text that a
+customer, visitor or user wrote (messages, names, emails, phones, notes, survey feedback, custom attribute text) is
+wrapped in `<untrusted_content source=... id=...>` with every `<` and `&` escaped inside, so it is read as data,
+never as instructions. Reports need a Chatwoot administrator (or a custom role with `report_manage`); everything else
+needs an agent. `get_me` is always on.
 
-| Tool | Description |
-|---|---|
-| `get_my_profile` | Who this connection acts as, and which account the tools work in. Never shows a key. |
-| `list_conversations` | List chats by status, assignee, inbox, team or label, newest activity first. |
-| `search_conversations` | Find chats whose messages contain some words. |
-| `get_conversation` | Open one chat: status, customer, assignee, team, labels, last message. |
-| `get_messages` | Read the messages in a chat. Customer text is wrapped in `<untrusted_content>`. |
-| `filter_conversations` | Find chats by detailed conditions joined by all or any: status, priority, assignee, team, inbox, labels, dates (including "no activity for N days"), email subject or a custom field. |
-| `list_conversation_attachments` | The files sent in a chat: type, size and who sent it. Files are not opened and no download links are given. |
-| `get_conversation_counts` | Count chats: yours, assigned, unassigned, all. |
-| `get_conversation_labels` | The labels on one chat. |
-| `search_contacts` | Find customers by name, email, phone or identifier. |
-| `get_contact` | Open one customer. |
-| `list_contacts` | Browse customers, 15 per page, optionally by label. |
-| `get_contact_labels` | The labels on one customer. |
-| `get_contact_notes` | The team's notes about one customer. |
-| `get_contact_conversations` | All chats one customer has had. |
-| `list_inboxes` / `list_agents` / `list_teams` / `list_labels` / `list_canned_responses` | Small lists of names and ids the assistant needs for the other tools. |
-| `get_inbox` | One inbox's settings (greeting, working hours, auto-assignment). Never its webhook address or secrets. |
-| `list_team_members` | The agents in one team. |
-| `list_custom_attribute_definitions` | The custom fields defined for chats or customers, with their allowed values. |
-| `search_help_articles` | Search the help-centre articles, to answer from what the company wrote. Drafts are included and marked by `status`. |
-| `list_macros` | The macros (saved sets of steps) the key's owner can run, with their steps. |
-| `get_account` | The account's name, language, status and support address. No billing or settings. |
-| `get_report_summary` | Chat counts, reply and resolution times and satisfaction scores for a period, with the period before for comparison. |
-| `get_report_by_group` | The same kind of numbers split by agent, team, inbox, label or channel. |
-| `list_csat_responses` | Satisfaction-survey answers for a period: score and the customer's words (wrapped as untrusted), by score, agent, inbox or team. |
-| `get_first_response_distribution` | How quickly first replies went out, in time bands, per channel. |
+Read:
 
-Write (only exist when `CHATWOOT_MCP_ENABLE_WRITES=true`; none can reach a customer):
+| Tool | Module | Description |
+|---|---|---|
+| `get_me` | always | Who this connection acts as, their role and which account the tools work in. Never shows a key. |
+| `list_inboxes` / `get_inbox` | reference | Inboxes with their ids; one inbox's greeting, hours and assignment settings. |
+| `list_agents` / `list_teams` / `list_team_members` | reference | Staff, teams and who is in a team. |
+| `list_labels` / `list_canned_responses` | reference | Label titles; saved quick replies. |
+| `list_custom_attribute_definitions` | reference | Custom fields for chats or customers, with their keys and allowed values. |
+| `get_account` | reference | The account's name, language, status and support address. |
+| `list_conversations` | conversations | Chats by status, assignee, inbox, team or label (any of them), newest activity first. |
+| `search_conversations` | conversations | Chats whose messages contain some words. |
+| `filter_conversations` | conversations | Chats by conditions joined by all or any: status, priority, assignee, team, inbox, labels, dates (including "no activity for N days"), subject or a custom field. |
+| `get_conversation` | conversations | One chat: status, customer, assignee, team, labels, custom fields, last message, link. |
+| `get_conversation_counts` | conversations | Mine, assigned, unassigned and all. |
+| `list_conversation_attachments` | conversations | Files sent in a chat: type, size, sender. No download links. |
+| `get_messages` | messages | A chat's messages, oldest first; the latest 20 by default, `before`/`after` to page. |
+| `search_contacts` / `list_contacts` | contacts | Find customers by name, email, phone or identifier; browse them by label. |
+| `get_contact` / `get_contact_conversations` / `get_contact_notes` | contacts | One customer, their chats, and the team's notes about them. |
+| `get_conversation_labels` / `get_contact_labels` | labels | The labels on a chat or a customer. |
+| `search_help_articles` | help_center | Help-centre articles; drafts are included and marked by `status`. |
+| `get_report_summary` | reports | Counts, reply and resolution times for a period, with the previous period for comparison. |
+| `get_report_by_group` | reports | The same split by agent, team, inbox, label or channel. |
+| `get_first_response_distribution` | reports | How quickly first replies went out, in time bands per channel. |
+| `list_csat_responses` | reports | Satisfaction-survey answers: score and the customer's words, by score, agent, inbox or team. |
+| `list_macros` | macros (opt-in) | Macros the key's owner can run, with their steps. |
 
-| Tool | Description |
-|---|---|
-| `add_private_note` | Add an internal note to a chat. Refuses to report success if Chatwoot did not mark it private. |
-| `add_conversation_labels` | Add labels to a chat. Existing labels stay; labels that do not exist are refused. |
-| `add_contact_labels` | The same for a customer. |
-| `remove_conversation_labels` | Take labels off a chat. Other labels stay. |
-| `add_contact_note` | Add a note about a customer, shown to the team beside every chat with them. |
+Write (absent when `CHATWOOT_READ_ONLY=true`; none of these reach the customer, so they run at once):
 
-Actions (only exist when `CHATWOOT_MCP_ENABLE_ACTIONS=true`; each one asks first, see [The confirm step](#the-confirm-step)):
+| Tool | Module | Description |
+|---|---|---|
+| `assign_conversation` | conversations | Assign to an agent, a team or both. The team is set first, because changing it drops an agent who is not in it. |
+| `set_conversation_status` | conversations | Open, pending, snoozed (with a wake time) or resolved. Opening also assigns the chat to the key's owner when their role is agent (Chatwoot's rule). |
+| `set_conversation_priority` | conversations | None, low, medium, high or urgent. |
+| `set_conversation_custom_attributes` | conversations | Fill in custom fields; only defined fields are accepted and the others are kept. |
+| `add_private_note` | messages | An internal note. Refuses to report success unless Chatwoot marked it private. |
+| `create_contact` / `update_contact` | contacts | Create a customer (with an email, phone or identifier), or change only the fields given. |
+| `add_contact_note` | contacts | A note about a customer, shown to the team beside every chat with them. |
+| `add_conversation_labels` / `add_contact_labels` | labels | Add existing labels; others stay; unknown labels are refused instead of created. |
+| `remove_conversation_labels` | labels | Take labels off a chat; others stay. |
 
-| Tool | Description |
-|---|---|
-| `send_reply` | Send a reply to the customer in a chat. Refused if the chat cannot be replied to. |
-| `assign_conversation` | Assign a chat to an agent, a team, or both. Replaces who it is assigned to now. |
-| `set_conversation_status` | Set a chat to open, pending, snoozed or resolved. Reopening also assigns it to the person who owns the key when their role is agent (Chatwoot's rule), and the preview says so. |
-| `set_conversation_priority` | Set a chat's priority: none, low, medium, high or urgent. |
-| `create_conversation` | Start a new chat with a customer in an inbox, optionally with a first message the customer receives. |
-| `create_contact` | Create a customer. Needs at least one of email, phone number or identifier. |
-| `set_conversation_custom_attributes` | Fill in a chat's custom fields. Only fields that exist are accepted; other fields stay as they are. |
-| `run_macro` | Run a macro on one chat. The preview lists every step and warns if any step reaches the customer or an outside address. |
-| `update_contact` | Change a customer's name, email, phone number or identifier. |
+### Two-step tools
 
-Tools never take an account id. The account is fixed by `CHATWOOT_ACCOUNT_ID`, so an assistant cannot move to another account.
+A message to a customer cannot be unsent, and a macro can do several things at once, so these modules are **off by
+default** (`CHATWOOT_ENABLE_REPLIES=true`, `CHATWOOT_ENABLE_MACROS=true`) and every action takes two calls. The
+`prepare_*` tool changes nothing: it looks up what the action would touch and returns a preview and a
+`confirmation_token`. The assistant shows the preview to the user, and only after they agree calls the matching tool
+with the token and the same arguments. A token is bound to the caller, the action and the exact arguments, works
+once and expires (`CHATWOOT_CONFIRM_TTL_SECONDS`).
 
-## Two ways to run it
+| Tool | Module | Description |
+|---|---|---|
+| `prepare_send_reply` | replies | Preview a reply: who it goes to, on which channel. Refused if the chat cannot be replied to. |
+| `send_reply` | replies | Send the approved reply. Refuses to report success if Chatwoot marked it private; a failure says whether it went. |
+| `prepare_create_conversation` | replies | Preview a new chat with a customer in an inbox, with an optional first message. |
+| `create_conversation` | replies | Start the approved chat. |
+| `prepare_run_macro` | macros | Preview every step of a macro on one chat, with a warning for steps that message the customer, send a file or transcript, or call a webhook. |
+| `run_macro` | macros | Run the approved macro. Chatwoot runs it in the background. |
 
-- **stdio** (`chatwoot-mcp stdio`): one person, on their own machine, started by the MCP client. The key comes from `CHATWOOT_API_TOKEN`.
-- **http** (`chatwoot-mcp http`): hosted for many people. Each caller sends their own key as the `X-Chatwoot-Token` header to `/http/api-key/mcp`. `GET /healthz` is for health checks.
+## Security notes
 
-## The confirm step
-
-An action never changes anything the first time you call it. The first call looks up what it would touch and returns a plain **preview** (who would get the message, what would change from and to) and a one-time `confirm_token`. The assistant is told to show the preview to the person and to call the tool again with the same arguments and the token only after they clearly agree.
-
-The token is tied to the person's key, the tool and the exact arguments, so it cannot be used by someone else, for another action, or after the request was edited. It works once and expires after `CHATWOOT_MCP_CONFIRM_TTL_SECONDS` (default 5 minutes). Tokens are kept in this process's memory, so run a single server process; several processes behind a load balancer would need shared storage.
-
-## How the key is handled
-
-- The key is sent to Chatwoot in Chatwoot's own `api_access_token` header and nowhere else. It is never shown in a tool result, an error or a log.
-- The client never sends cookies or `X-Auth-Request-*` headers, and never follows redirects. In hosted mode any `X-Auth-Request-*` header a caller sends is dropped on arrival: those headers carry identity inside Moneta and must only come from the front door.
-- A missing, wrong or expired key gives a short plain error. No request is made without a key.
-- Request URLs are not logged, because a customer search puts the customer's email or phone in the URL.
-
-## Other safety habits
-
-- **Read-only by default.** The five write tools need `CHATWOOT_MCP_ENABLE_WRITES=true` and the nine action tools need `CHATWOOT_MCP_ENABLE_ACTIONS=true`; otherwise they do not exist for the assistant.
-- **Customer text is marked untrusted.** Message text is wrapped in `<untrusted_content>` and the server tells the assistant to treat it as data, never as instructions. A closing tag typed by a customer is neutralised.
-- **Short replies.** Chatwoot's large payloads are reduced to the useful fields; lists and text are capped (`CHATWOOT_MCP_MAX_ITEMS`, `CHATWOOT_MCP_MAX_TEXT_CHARS`).
-- **No deleting, no settings, no user management, no platform API.**
-
-## Install
-
-Not published to PyPI. From this folder:
-
-```bash
-uv venv && uv pip install -e ".[dev]"
-```
-
-## Run
-
-Laptop (stdio):
-
-```bash
-CHATWOOT_BASE_URL=https://chatwoot.example.com \
-CHATWOOT_ACCOUNT_ID=1 \
-CHATWOOT_API_TOKEN=<your key: Chatwoot, Profile Settings, Access Token> \
-chatwoot-mcp stdio
-```
-
-Claude Code:
-
-```bash
-claude mcp add chatwoot \
-  -e CHATWOOT_BASE_URL=https://chatwoot.example.com -e CHATWOOT_ACCOUNT_ID=1 -e CHATWOOT_API_TOKEN=<key> \
-  -- chatwoot-mcp stdio
-```
-
-Hosted (http):
-
-```bash
-CHATWOOT_BASE_URL=http://chatwoot:3000 CHATWOOT_ACCOUNT_ID=1 chatwoot-mcp http   # listens on 127.0.0.1:8214
-```
-
-then point the MCP client at `http://<host>:8214/http/api-key/mcp` with the header `X-Chatwoot-Token: <your key>`.
-
-All settings are in [`.env.example`](./.env.example), each with a comment.
-
-## Docker
-
-```bash
-docker build -t chatwoot-mcp-server mcp/      # from the repository root
-docker run --rm -p 8214:8214 -e CHATWOOT_BASE_URL=http://chatwoot:3000 -e CHATWOOT_ACCOUNT_ID=1 chatwoot-mcp-server
-```
-
-The image runs as a normal user and has a health check on `/healthz`. Do not publish the port to the internet: in hosted mode anyone who can reach it and holds a valid Chatwoot key can use that key's rights.
+- The key goes to Chatwoot only in its `api_access_token` header. It never appears in an error (Chatwoot's own error
+  text is scrubbed of it), a tool result or a log.
+- The client refuses cookies, never follows redirects, ignores proxy settings from the environment, and raises
+  before sending any `X-Auth-Request-*` header: an SSO-fronted Chatwoot trusts those as proof of identity.
+- Tools never take an account id; the account comes from `CHATWOOT_ACCOUNT_ID`.
+- `get_me` returns an allow-list of fields: Chatwoot's profile also holds the user's access and pubsub tokens.
+- Request URLs are never logged, because a customer search puts an email or phone number in the URL.
+- Confirmations are stored under a hash of the token, never the token. Platform mode keeps them, and the cached
+  keys, Fernet-encrypted in Valkey.
+- See [SECURITY.md](SECURITY.md) for reporting and deployment notes.
 
 ## Development
 
 ```bash
+uv sync --all-extras
 uv run ruff format . && uv run ruff check .
 uv run pytest --cov=chatwoot_mcp --cov-fail-under=80
+docker build --platform linux/amd64 .
 ```
 
-The tests use a pretend Chatwoot and need no real server. See [CLAUDE.md](./CLAUDE.md) for the layout and the rules for changing this.
+The tests use a pretend Chatwoot (`httpx.MockTransport`) and an in-memory MCP client, so no network is needed.
+`tests/test_tools.py` checks that every tool has its hints and tags and that the tables above list exactly the tools
+that exist. See [CLAUDE.md](CLAUDE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## What is not here yet
+## License
 
-- **Moneta login and per-user keys.** Hosted mode today expects each caller to bring their own Chatwoot key. Signing in with the Moneta login (Cognito) and getting a key made automatically for each person is planned, and would live in a separate `platform/` package.
-- **Shared confirm storage** for running several server processes.
-- **Chatwoot features outside support chats:** campaigns, editing the help centre, automation, webhooks, opening attachments, WhatsApp templates, the audit log, merging customers and creating labels or macros.
-- **Deleting anything, and user, team or inbox management.** Left out on purpose.
+MIT.

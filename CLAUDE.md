@@ -1,95 +1,94 @@
 # CLAUDE.md: mcp/ (chatwoot-mcp-server)
 
-## What this is
+Guidance for Claude Code when working in this folder. The layout and conventions follow
+`Pressingly/zammad-mcp-server` (branch `foss-sandbox`); keep them aligned.
 
-A FastMCP v3 server that exposes Chatwoot support chats as MCP tools. It lives in `mcp/` inside the Chatwoot fork
-but is its own Python project: it shares no code with the Rails app and must never import from it.
+## Project
 
-**No changes to Chatwoot are allowed.** Every tool calls an API route that already exists. The API description is
-`swagger/swagger.json` in the repository root; check a route there (and in `app/views/api/`) before adding a tool.
+`chatwoot-mcp-server`: an MIT-licensed MCP server for Chatwoot, built on FastMCP. Every Chatwoot call carries the
+caller's own key in `api_access_token`, never a shared admin key. It lives in `mcp/` inside the Chatwoot fork but is
+its own Python project: it must never import from the Rails app.
 
-## Layout
+**No changes to Chatwoot are allowed.** Every tool calls an API route that already exists. Check a route in
+`swagger/swagger.json`, `config/routes.rb` and `app/views/api/` (repository root) before adding a tool.
 
-```
-mcp/
-├── pyproject.toml  README.md  CLAUDE.md  Dockerfile  .env.example
-├── chatwoot_mcp/
-│   ├── __main__.py        # `chatwoot-mcp stdio|http`; settings errors exit with code 2
-│   ├── config.py          # Settings.from_env: every value checked once at start-up
-│   ├── server.py          # build_server(settings, token_getter=...), build_http_app(mcp)
-│   ├── shaping.py         # compact_* reduce Chatwoot's payloads; wrap_untrusted marks customer text
-│   ├── client/            # ChatwootClient: the only code that talks to Chatwoot (errors.py = plain messages)
-│   ├── credentials/       # static.py (stdio: key from env), header.py (http: X-Chatwoot-Token per caller)
-│   └── tools/             # one module per area, each with register(mcp, ctx); support.py = shared pieces
-└── tests/                 # pretend Chatwoot (httpx.MockTransport) + in-memory MCP client; no network
-```
+- `chatwoot_mcp/__main__.py`: `chatwoot-mcp stdio|http`; `http` hands over to `platform/` when
+  `COGNITO_USER_POOL_ID` is set.
+- `chatwoot_mcp/server.py`: `build_server(settings)` registers tools; `build_http_app(mcp, settings)` serves
+  `/http/api-key/mcp`, `GET /healthz`, and `/mcp` only with `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE=true`.
+- `chatwoot_mcp/client/`: the async Chatwoot client (`http.py`), its errors and `to_tool_error` (`errors.py`), and
+  tolerant pydantic views of Chatwoot objects (`models.py`). It refuses cookies, never follows redirects, raises if
+  an `X-Auth-Request-*` header is about to be sent, and scrubs the key from Chatwoot's error text. Keep all four.
+- `chatwoot_mcp/credentials/`: where each request's key comes from (`CHATWOOT_HTTP_TOKEN`, or `X-Chatwoot-Token` on
+  `/http/api-key/mcp`), and the owner's role in `CHATWOOT_ACCOUNT_ID` from `GET /api/v1/profile`.
+- `chatwoot_mcp/platform/`: Cognito OAuth plus each user's own key, fetched through Chatwoot's SSO handoff. See
+  `docs/platform-mode.md`.
+- `chatwoot_mcp/tiers.py`: `tier:none|agent|admin` and the one `auth=` check that filters tools by tier.
+- `chatwoot_mcp/shaping.py`: compact output, `<untrusted_content>` framing, truncation, web UI links.
+  `confirmations.py`: two-step confirm tokens.
+- `chatwoot_mcp/tools/`: one module per Chatwoot area, each with `register(mcp, context)`; `context.py` holds the
+  session, the specs and the confirm helpers.
 
 ## Commands
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
+uv sync --all-extras
+uv run ruff format .
+uv run ruff check .
 uv run pytest --cov=chatwoot_mcp --cov-fail-under=80
-uv run ruff format . && uv run ruff check .
-CHATWOOT_BASE_URL=... CHATWOOT_ACCOUNT_ID=1 CHATWOOT_API_TOKEN=... python -m chatwoot_mcp stdio
+docker build --platform linux/amd64 .
 ```
 
-## Rules that must keep holding (each has a test)
+## Isolation rule
 
-- **The key** goes to Chatwoot only in the `api_access_token` header, never appears in an error, a tool result or a
-  log, and is never sent anywhere else. The client sends no cookies and no `X-Auth-Request-*` headers and does not
-  follow redirects. Do not add a way around any of these.
-- **No account id in tool arguments.** The account comes from `CHATWOOT_ACCOUNT_ID`.
-- **Writes and actions are opt-in.** `tier:write` tools (notes, labels) are registered only when
-  `CHATWOOT_MCP_ENABLE_WRITES=true` and must never be able to reach a customer. `tier:action` tools (reply, assign,
-  status, priority, custom fields, macros, create chat, create or update customer) only when
-  `CHATWOOT_MCP_ENABLE_ACTIONS=true`. A `run_macro` preview warns about every step that reaches the customer or
-  leaves Chatwoot (`OUTWARD_MACRO_STEPS`).
-  `add_private_note` checks Chatwoot marked the note private; `send_reply` checks it did not.
-- **Every action has two steps** (`gated()` in `tools/actions.py`). The first call changes nothing and returns a
-  preview plus a `confirm_token`; the second, with the same arguments and the token, does it. Tokens are tied to the
-  caller's key, the tool and the exact arguments, work once and expire (`confirmations.py`). Validate and look things
-  up *before* issuing a token, so a doomed action never gets one. Tokens live in memory, so one process only.
-- **Customer text is untrusted.** Wrap any text a customer or outsider wrote with `shaping.wrap_untrusted`.
-- **`get_my_profile` returns an allow-list of fields.** Chatwoot's profile holds access and pubsub tokens.
-- **Do not log request URLs** (`httpx` is set to WARNING in `__main__.py`): a customer search puts an email or phone
-  in the URL.
-- **Every tool** has all four MCP annotation hints, one `tier:*` tag and one `module:*` tag, and raises `ToolError`
-  with a plain message (via `@reporting_errors`) instead of leaking a traceback. `tests/test_server.py` checks this.
+- The community core (`client/`, `credentials/`, `tools/`, `server.py`) works against any Chatwoot and imports
+  nothing from `platform/`.
+- Platform-only logic (Cognito, key fetching, Valkey storage) lives in `platform/` and is reached by a one-line hook,
+  only when `COGNITO_USER_POOL_ID` is set.
+- Disabled tool modules never register. Each module has one `CHATWOOT_ENABLE_*` flag, read through
+  `env_flags.env_flag`; `replies` and `macros` are off by default. `CHATWOOT_READ_ONLY` keeps every write unregistered.
 
-## Adding an action
+## Tool conventions
 
-Same as a tool, but use `ACTION_ADDS` (it only adds) or `ACTION_OVERWRITES` (it replaces what was there), tag it
-`TIER_ACTION`, and wrap it in `gated(...)` with a `build_preview` that reads what it would touch. Say in the preview
-anything Chatwoot does as a side effect (for example, reopening a chat assigns it to the acting agent).
-
-## Adding a tool
-
-1. Find the route in `swagger/swagger.json` and the response shape in `app/views/api/`.
-2. Write the test first in `tests/` using `FakeChatwoot` and `call(...)`.
-3. Add the tool in the right `tools/<area>.py` with `@mcp.tool(annotations=..., tags={TIER_..., "module:..."})`
-   and `@reporting_errors`. Shape the result in `shaping.py`; do not return Chatwoot's raw payload.
-4. Update the tool table in README.md and the expected sets in `tests/test_server.py`.
+- `snake_case` verb_noun names. Tools never take an account id.
+- Register through `@mcp.tool(**context.tool(title, <spec>, module=..., tier=...))` with a spec from
+  `tools/context.py` (`READ`, `CREATE`, `ADD`, `OVERWRITE`, `PREPARE`, `IRREVERSIBLE`): it sets the title, all four
+  `ToolAnnotations` hints, the `tier:*`, `module:*` and read/write tags and the tier check. `tests/test_tools.py`
+  enforces it.
+- Tools return an `Error: ...` string instead of raising: catch `ChatwootError` and return `to_tool_error(error)`.
+- Validate responses with `Model.parse(...)` / `parse_rows(...)` inside the tool's `try`, so an odd payload becomes an
+  `Error:` string. Shape the result in `shaping.py`; never return Chatwoot's raw payload.
+- Text a customer, visitor or user wrote is untrusted: return it through `shaping.untrusted_field` or
+  `frame_untrusted`, never raw. Names only administrators write (inboxes, teams, labels, macros) are returned as is.
+- Anything that reaches the customer or runs many steps (replies, macros) is a `prepare_*` tool plus a confirming
+  tool, through `prepared(...)` and `confirmation_refusal(...)` in `tools/context.py`, and its module is off by
+  default. Validate and look things up in the `prepare_*` tool, so a doomed action never gets a token. A failed send
+  says whether it surely did not go, may have gone, or went (`replies.send_failure`).
+- `get_me` returns an allow-list of fields: the profile holds the user's access and pubsub tokens.
+- Do not log request URLs (`httpx` is set to WARNING): a customer search puts an email or phone in the URL.
+- Update the README tool tables with every tool change; `tests/test_tools.py` checks they match.
 
 ## Chatwoot facts worth knowing
 
 - Account routes are `/api/v1/accounts/{id}/...`; reports are `/api/v2/...`; the profile is `/api/v1/profile`.
-- `POST .../conversations/{id}/labels` **replaces** the whole label set, so `add_conversation_labels` reads the
-  current labels first and sends the union. Labels that do not exist in the account are refused, to avoid creating
-  stray tags.
-- Label titles are stored in lower case, so the label tools lower-case what they are given before matching.
-- `toggle_status` reads `snoozed_until` with `strptime('%s')`: send Unix seconds. An ISO string parses as a
-  moment in 1970, and the chat wakes at once.
-- Changing a chat's team drops an assignee who is not in that team, so `assign_conversation` sets the team first.
-- The `labels` filter on chat and customer lists matches *any* of the labels, not all.
-- `POST .../conversations/{id}/custom_attributes` also **replaces** the whole set (unless `merge` is sent, which
-  older versions ignore), so the tool sends the current fields plus the new ones.
-- Macros run in a background job (Sidekiq): `execute` answers at once and the steps happen shortly after.
-- Report timestamps are Unix seconds. The tool takes `YYYY-MM-DD` dates (UTC) and converts them.
-- Some report routes exist only in the Enterprise edition or in some versions.
-- Under the Moneta SSO setup the public host puts logins in front of `/api`, so a hosted MCP server should call
-  Chatwoot on the internal network.
+- Chatwoot answers **401** both for a bad key (`Invalid Access Token`) and for a role refusal
+  (`You are not authorized to do this action`); `error_for_status` reads the text.
+- `POST .../labels` and `POST .../custom_attributes` **replace** the whole set, so writes read the current values
+  first and send the result. Label titles are stored lower-case; unknown labels are refused instead of created.
+- `toggle_status` reads `snoozed_until` with `strptime('%s')`: send Unix seconds. An ISO string parses as 1970.
+- Changing a chat's team drops an assignee who is not in it, so `assign_conversation` sets the team first.
+- Opening a chat assigns it to the key's owner when their role is agent (not administrator).
+- The `labels` filter on chat and customer lists matches *any* of the labels.
+- Macros run in a background job (Sidekiq): `execute` answers at once.
+- Reports and CSAT need an administrator, or an Enterprise custom role with `report_manage`.
+- Report timestamps are Unix seconds; the tools take `YYYY-MM-DD` dates (UTC). Some report routes exist only in the
+  Enterprise edition or in some versions.
+- Under Moneta SSO the public host puts a login in front of `/api`, so a hosted server calls the internal URL.
+- Attachment and avatar URLs need `FRONTEND_URL` set in Chatwoot; without it those responses fail with a 500.
 
-## Branch policy
+## Commits and branch policy
 
-Same as the rest of the fork: feature branch, then a pull request into `foss-sandbox`, then a promotion pull
-request from `foss-sandbox` into `foss-main` (merge commit, never squash). Never push directly to either.
+- Conventional Commits: `type(scope): subject`, imperative, lowercase. No AI attribution anywhere: no `Co-Authored-By`
+  trailer and no "Generated with" line, in commits or PRs.
+- Feature branch, then a pull request into `foss-sandbox`, then a promotion pull request from `foss-sandbox` into
+  `foss-main` (merge commit, never squash). Never push directly to either.

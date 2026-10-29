@@ -1,61 +1,167 @@
-"""The "are you sure?" step for actions that change things.
+"""Two-step confirmation for actions that must not run on a model's whim.
 
-First call to an action tool changes nothing: it returns a preview and a one-time token. The assistant must
-show the preview to the person and only then call the tool again, with the same arguments and the token.
+``issue`` stores a record bound to the caller's identity, the action name and the sha256 of the exact payload, and
+returns a random token. ``consume`` takes the record out atomically (single use, even when the check then fails),
+and succeeds only if it has not expired and identity, action and payload all match. Records are stored under
+``sha256(token)``, never the token itself.
 
-A token is tied to who asked (a hash of their key), which tool, and the exact arguments, so it cannot be used
-by someone else, for a different action, or after the request was edited. It works once and expires.
+One identity may hold at most ``max_outstanding_per_identity`` live confirmations, so no single caller can fill the
+store, and the memory backend holds at most ``max_entries`` records in all.
 
-Tokens are kept in this process's memory. That is enough for one server process; if the server is ever run as
-several processes behind a load balancer, the tokens need shared storage.
+The backend is a two-method protocol: :class:`MemoryConfirmationBackend` (one process), and in platform mode
+``chatwoot_mcp.platform.storage.ValkeyConfirmationBackend`` (``SET key value EX ttl`` and ``GETDEL key``,
+Fernet-encrypted), shared by every replica. The per-identity limit is kept in each process.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import hmac
 import json
 import secrets
 import time
-from collections import OrderedDict
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
+
+from chatwoot_mcp.config import DEFAULT_CONFIRM_TTL_SECONDS
+
+KEY_PREFIX = "chatwoot-mcp:confirm:v1:"
+MAX_OUTSTANDING_PER_IDENTITY = 20
+# ponytail: a count cap, not Zammad's byte cap. Our records hold ids and short text only; add a byte ledger if a
+# confirmation ever has to carry a whole message body.
+MAX_MEMORY_ENTRIES = 10_000
+
+Clock = Callable[[], float]
 
 
-def fingerprint(tool: str, arguments: Mapping[str, Any]) -> str:
-    canonical = json.dumps({"tool": tool, "arguments": arguments}, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()
+class ConfirmationError(Exception):
+    """The confirmation token is unknown, used, expired or does not match."""
+
+
+class ConfirmationLimitError(ConfirmationError):
+    """A new confirmation would exceed the caller's or the store's limit."""
+
+
+class ConfirmationBackend(Protocol):
+    async def put(self, key: str, value: str, ttl_seconds: int) -> None: ...
+
+    async def take(self, key: str) -> str | None:
+        """Atomically return and delete the value, or ``None`` if absent or expired."""
+        ...
+
+
+class MemoryConfirmationBackend:
+    def __init__(self, clock: Clock = time.time, *, max_entries: int = MAX_MEMORY_ENTRIES) -> None:
+        self._clock = clock
+        self._max_entries = max_entries
+        self._values: dict[str, tuple[str, float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def put(self, key: str, value: str, ttl_seconds: int) -> None:
+        async with self._lock:
+            now = self._clock()
+            live = {k: entry for k, entry in self._values.items() if entry[1] > now and k != key}
+            if len(live) >= self._max_entries:
+                raise ConfirmationLimitError(
+                    "too many actions are waiting for confirmation on this server; try again in a few minutes"
+                )
+            self._values = {**live, key: (value, now + ttl_seconds)}
+
+    async def take(self, key: str) -> str | None:
+        async with self._lock:
+            entry = self._values.get(key)
+            self._values = {k: v for k, v in self._values.items() if k != key}
+        if entry is None or entry[1] <= self._clock():
+            return None
+        return entry[0]
+
+
+def payload_digest(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _storage_key(token: str) -> str:
+    return KEY_PREFIX + hashlib.sha256(token.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
-class _Pending:
-    owner: str
-    digest: str
+class _Record:
+    identity: str
+    action: str
+    payload_sha256: str
     expires_at: float
 
 
 class Confirmations:
     def __init__(
-        self, *, ttl_seconds: int = 300, max_entries: int = 1000, clock: Callable[[], float] = time.monotonic
+        self,
+        backend: ConfirmationBackend,
+        *,
+        ttl_seconds: int = DEFAULT_CONFIRM_TTL_SECONDS,
+        clock: Clock = time.time,
+        max_outstanding_per_identity: int = MAX_OUTSTANDING_PER_IDENTITY,
     ) -> None:
-        self.ttl_seconds = ttl_seconds
-        self._max_entries = max_entries
+        self._backend = backend
+        self._ttl = ttl_seconds
         self._clock = clock
-        self._pending: OrderedDict[str, _Pending] = OrderedDict()
+        self._max_outstanding = max_outstanding_per_identity
+        self._outstanding: dict[str, dict[str, float]] = {}
 
-    def issue(self, owner: str, tool: str, arguments: Mapping[str, Any]) -> str:
-        token = secrets.token_urlsafe(24)
-        self._pending[token] = _Pending(owner, fingerprint(tool, arguments), self._clock() + self.ttl_seconds)
-        while len(self._pending) > self._max_entries:
-            self._pending.popitem(last=False)
+    @property
+    def ttl_seconds(self) -> int:
+        return self._ttl
+
+    async def issue(self, *, identity: str, action: str, payload: Any) -> str:
+        token = secrets.token_urlsafe(32)
+        key = _storage_key(token)
+        expires_at = self._clock() + self._ttl
+        value = json.dumps(asdict(_Record(identity, action, payload_digest(payload), expires_at)))
+        self._reserve(identity, key, expires_at)
+        try:
+            await self._backend.put(key, value, self._ttl)
+        except BaseException:
+            self._release(identity, key)
+            raise
         return token
 
-    def redeem(self, owner: str, tool: str, arguments: Mapping[str, Any], token: str) -> bool:
-        """True only if the token is known, unexpired, and matches who, what and the exact arguments. Uses it up."""
-        pending = self._pending.pop(token, None) if token else None
-        return (
-            pending is not None
-            and pending.expires_at > self._clock()
-            and secrets.compare_digest(pending.owner, owner)
-            and secrets.compare_digest(pending.digest, fingerprint(tool, arguments))
-        )
+    async def consume(self, token: str, *, identity: str, action: str, payload: Any) -> None:
+        """Spend ``token``; raise :class:`ConfirmationError` unless it matches this exact request."""
+        key = _storage_key(token)
+        raw = await self._backend.take(key) if token else None
+        if raw is None:
+            raise ConfirmationError("confirmation token is unknown, already used or expired; prepare the action again")
+        record = _Record(**json.loads(raw))
+        self._release(record.identity, key)
+        if record.expires_at <= self._clock():
+            raise ConfirmationError("confirmation token expired; prepare the action again")
+        expected = (identity, action, payload_digest(payload))
+        actual = (record.identity, record.action, record.payload_sha256)
+        if not all(hmac.compare_digest(a.encode(), b.encode()) for a, b in zip(expected, actual, strict=True)):
+            raise ConfirmationError("confirmation token does not match this request; prepare the action again")
+
+    def _live(self, identity: str) -> dict[str, float]:
+        now = self._clock()
+        return {key: expiry for key, expiry in self._outstanding.get(identity, {}).items() if expiry > now}
+
+    def _reserve(self, identity: str, key: str, expires_at: float) -> None:
+        live = self._live(identity)
+        if len(live) >= self._max_outstanding:
+            raise ConfirmationLimitError(
+                f"you already have {len(live)} actions waiting for confirmation; confirm them or let them expire "
+                f"(each lasts {self._ttl} seconds) before preparing another"
+            )
+        now = self._clock()
+        others = {
+            other: holds
+            for other, holds in self._outstanding.items()
+            if other != identity and any(expiry > now for expiry in holds.values())
+        }
+        self._outstanding = {**others, identity: {**live, key: expires_at}}
+
+    def _release(self, identity: str, key: str) -> None:
+        remaining = {other: expiry for other, expiry in self._live(identity).items() if other != key}
+        others = {other: keys for other, keys in self._outstanding.items() if other != identity}
+        self._outstanding = {**others, identity: remaining} if remaining else others

@@ -1,27 +1,51 @@
-"""One module per area, each with `register(mcp, ctx)`.
+"""MCP tool modules, one per Chatwoot area.
 
-Every tool carries all four MCP annotation hints, a `tier:*` tag and a `module:*` tag. The write tools are only
-registered when CHATWOOT_MCP_ENABLE_WRITES=true, and the action tools (which change things for customers or
-colleagues, each behind a confirm step) only when CHATWOOT_MCP_ENABLE_ACTIONS=true; otherwise they do not exist
-for the assistant at all.
+Each module exposes ``register(mcp, context)``. Every tool carries all four MCP ``ToolAnnotations`` hints, a
+``tier:*`` tag and a ``module:*`` tag, and returns an ``Error: ...`` string instead of raising.
+
+A module whose ``CHATWOOT_ENABLE_<MODULE>`` flag is false never registers, and ``CHATWOOT_READ_ONLY`` keeps every
+write tool unregistered. ``get_me`` is always on. ``replies`` and ``macros`` reach the customer, so they are off by
+default and go through a confirm step.
 """
 
 from __future__ import annotations
 
+from types import ModuleType
+
 from fastmcp import FastMCP
 
-from chatwoot_mcp.tools import actions, contacts, conversations, lookups, profile, reports, writes
-from chatwoot_mcp.tools.support import ToolContext
+from chatwoot_mcp.config import Settings
+from chatwoot_mcp.tools import (
+    contacts,
+    conversations,
+    help_center,
+    labels,
+    macros,
+    me,
+    messages,
+    reference,
+    replies,
+    reports,
+)
+from chatwoot_mcp.tools.context import ToolContext
 
-__all__ = ["ToolContext", "register_tools"]
+__all__ = ["MODULES", "ToolContext", "register_tools"]
 
-READ_MODULES = (profile, conversations, contacts, lookups, reports)
+MODULES: dict[str, ModuleType] = {
+    "reference": reference,
+    "conversations": conversations,
+    "messages": messages,
+    "contacts": contacts,
+    "labels": labels,
+    "help_center": help_center,
+    "reports": reports,
+    "replies": replies,
+    "macros": macros,
+}
 
 
-def register_tools(mcp: FastMCP, ctx: ToolContext) -> None:
-    for module in READ_MODULES:
-        module.register(mcp, ctx)
-    if ctx.settings.enable_writes:
-        writes.register(mcp, ctx)
-    if ctx.settings.enable_actions:
-        actions.register(mcp, ctx)
+def register_tools(mcp: FastMCP, context: ToolContext, settings: Settings) -> None:
+    me.register(mcp, context)
+    for name, module in MODULES.items():
+        if settings.module_enabled(name):
+            module.register(mcp, context)

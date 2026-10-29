@@ -1,4 +1,9 @@
-"""Numbers: report summaries, and what customers said in satisfaction surveys."""
+"""Reports: summaries, group comparisons, first-reply bands and satisfaction-survey answers. Administrators only
+(or an Enterprise custom role with ``report_manage``), which is Chatwoot's own rule.
+
+Report timestamps are Unix seconds; the tools take ``YYYY-MM-DD`` dates (UTC) and convert them. Some report routes
+exist only in the Enterprise edition or in some versions.
+"""
 
 from __future__ import annotations
 
@@ -6,98 +11,133 @@ from datetime import UTC, date, datetime, time
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from chatwoot_mcp import shaping
-from chatwoot_mcp.tools.support import READ_ONLY, TIER_READ, ToolContext, page_info, reporting_errors
+from chatwoot_mcp.client import ChatwootError, to_tool_error
+from chatwoot_mcp.client.models import CsatResponse
+from chatwoot_mcp.shaping import shape_csat
+from chatwoot_mcp.tiers import Tier
+from chatwoot_mcp.tools.context import READ, ChatwootSession, ToolContext, as_dict, limited, page_info, tier_error
 
-ReportType = Literal["account", "agent", "inbox", "label", "team"]
-GroupBy = Literal["agent", "team", "inbox", "label", "channel"]
+MODULE = "reports"
 MAX_DAYS = 366
 # Chatwoot refuses a channel report longer than six calendar months (6.months = 15,778,476 seconds).
 CHANNEL_MAX_SECONDS = 15_778_476
 
+ReportType = Literal["account", "agent", "inbox", "label", "team"]
+GroupBy = Literal["agent", "team", "inbox", "label", "channel"]
+Since = Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")]
+Until = Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")]
+
 
 def day_range(since: str, until: str) -> tuple[int, int]:
-    """Turn two YYYY-MM-DD dates (UTC) into Chatwoot's start-of-first-day and end-of-last-day timestamps."""
+    """Two YYYY-MM-DD dates (UTC) as start-of-first-day and end-of-last-day timestamps; ``ValueError`` if invalid."""
     try:
         first, last = date.fromisoformat(since), date.fromisoformat(until)
     except ValueError:
-        raise ToolError("Dates must look like 2026-10-01 (year-month-day).") from None
+        raise ValueError("dates must look like 2026-10-01 (year-month-day)") from None
     if last < first:
-        raise ToolError("`until` must not be earlier than `since`.")
+        raise ValueError("`until` must not be earlier than `since`")
     if (last - first).days >= MAX_DAYS:
-        raise ToolError(f"Choose a range of at most {MAX_DAYS} days.")
+        raise ValueError(f"choose a range of at most {MAX_DAYS} days")
     start = int(datetime.combine(first, time.min, UTC).timestamp())
     end = int(datetime.combine(last, time.max.replace(microsecond=0), UTC).timestamp())
     return start, end
 
 
-def register(mcp: FastMCP, ctx: ToolContext) -> None:
-    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
-    @reporting_errors
+class ReportsRefused(ChatwootError):
+    """The caller is not known to be an administrator; refused before calling Chatwoot (fail closed)."""
+
+    def __init__(self, session: ChatwootSession) -> None:
+        reason = tier_error(Tier.ADMIN, session.tier).removeprefix("Error: ")
+        super().__init__(f"{reason} (reports need an administrator, or a custom role with report_manage)")
+
+
+def require_admin(session: ChatwootSession) -> None:
+    if session.lacks(Tier.ADMIN):
+        raise ReportsRefused(session)
+
+
+def register(mcp: FastMCP, context: ToolContext) -> None:
+    async def report(path: str, params: dict[str, Any]) -> Any:
+        session = await context.session()
+        require_admin(session)
+        return await session.get(path, params, version=2)
+
+    @mcp.tool(**context.tool("Get report summary", READ, module=MODULE, tier=Tier.ADMIN))
     async def get_report_summary(
-        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
-        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+        since: Since,
+        until: Until,
         type: Annotated[ReportType, Field(description="What to report on.")] = "account",  # noqa: A002
         id: Annotated[  # noqa: A002
             int | None, Field(ge=1, description="The agent, inbox, label or team id. Required unless type is account.")
         ] = None,
         business_hours: Annotated[bool, Field(description="Count only business hours.")] = False,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | str:
         """Summarise chats for a period: how many, reply times, resolution times and satisfaction scores.
 
         The answer also carries the same numbers for the period just before, for comparison.
         """
         if type != "account" and id is None:
-            raise ToolError(
-                f"`id` is required when type is {type}. Use list_agents, list_inboxes, list_teams or list_labels."
+            return (
+                f"Error: `id` is required when type is {type}; use list_agents, list_inboxes, list_teams or list_labels"
             )
-        start, end = day_range(since, until)
+        try:
+            start, end = day_range(since, until)
+        except ValueError as error:
+            return f"Error: {error}"
         params = {"type": type, "id": id, "since": start, "until": end, "business_hours": business_hours}
-        data = await ctx.client.get_account("/reports/summary", params=params, version=2)
-        return data if isinstance(data, dict) else {"result": data}
+        try:
+            data = await report("/reports/summary", params)
+        except ChatwootError as error:
+            return to_tool_error(error)
+        return as_dict(data)
 
-    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
-    @reporting_errors
+    @mcp.tool(**context.tool("Get report by group", READ, module=MODULE, tier=Tier.ADMIN))
     async def get_report_by_group(
         group_by: Annotated[GroupBy, Field(description="Split the numbers by agent, team, inbox, label or channel.")],
-        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
-        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+        since: Since,
+        until: Until,
         business_hours: Annotated[bool, Field(description="Count only business hours.")] = False,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | str:
         """Compare agents, teams, inboxes, labels or channels: chats handled, reply and resolution times."""
-        start, end = day_range(since, until)
+        try:
+            start, end = day_range(since, until)
+        except ValueError as error:
+            return f"Error: {error}"
         if group_by == "channel" and end - start > CHANNEL_MAX_SECONDS:
-            raise ToolError("The channel report covers at most six months. Choose a shorter period.")
-        params = {"since": start, "until": end, "business_hours": business_hours}
-        data = await ctx.client.get_account(f"/summary_reports/{group_by}", params=params, version=2)
+            return "Error: the channel report covers at most six months; choose a shorter period"
+        try:
+            data = await report(
+                f"/summary_reports/{group_by}", {"since": start, "until": end, "business_hours": business_hours}
+            )
+        except ChatwootError as error:
+            return to_tool_error(error)
         if not isinstance(data, list):
-            return data if isinstance(data, dict) else {"rows": []}
-        rows, cut = shaping.limit_items(data, ctx.settings.max_items)
-        out: dict[str, Any] = {"rows": rows}
+            return as_dict(data)
+        shown, cut = limited(data, context.max_items)
+        out: dict[str, Any] = {"rows": shown}
         if cut:
-            out["truncated"] = f"Only the first {ctx.settings.max_items} rows are shown."
+            out["truncated"] = f"Only the first {context.max_items} rows are shown."
         return out
 
-    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
-    @reporting_errors
-    async def get_first_response_distribution(
-        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
-        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
-    ) -> dict[str, Any]:
+    @mcp.tool(**context.tool("Get first response distribution", READ, module=MODULE, tier=Tier.ADMIN))
+    async def get_first_response_distribution(since: Since, until: Until) -> dict[str, Any] | str:
         """Show how quickly first replies went out, in time bands, for each channel."""
-        start, end = day_range(since, until)
-        params = {"since": start, "until": end}
-        data = await ctx.client.get_account("/reports/first_response_time_distribution", params=params, version=2)
-        return data if isinstance(data, dict) else {"result": data}
+        try:
+            start, end = day_range(since, until)
+        except ValueError as error:
+            return f"Error: {error}"
+        try:
+            data = await report("/reports/first_response_time_distribution", {"since": start, "until": end})
+        except ChatwootError as error:
+            return to_tool_error(error)
+        return as_dict(data)
 
-    @mcp.tool(annotations=READ_ONLY, tags={TIER_READ, "module:reports"})
-    @reporting_errors
+    @mcp.tool(**context.tool("List CSAT responses", READ, module=MODULE, tier=Tier.ADMIN))
     async def list_csat_responses(
-        since: Annotated[str, Field(description="First day, as year-month-day in UTC, for example 2026-10-01.")],
-        until: Annotated[str, Field(description="Last day (included), as year-month-day in UTC.")],
+        since: Since,
+        until: Until,
         ratings: Annotated[
             list[Annotated[int, Field(ge=1, le=5)]] | None, Field(description="Only these scores, 1 (worst) to 5.")
         ] = None,
@@ -105,9 +145,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         inbox_id: Annotated[int | None, Field(ge=1, description="Only chats in this inbox.")] = None,
         team_id: Annotated[int | None, Field(ge=1, description="Only chats of this team.")] = None,
         page: Annotated[int, Field(ge=1, description="Page number, starting at 1.")] = 1,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | str:
         """Read satisfaction-survey answers: the score and what the customer wrote, newest first. 25 per page."""
-        start, end = day_range(since, until)
+        try:
+            start, end = day_range(since, until)
+        except ValueError as error:
+            return f"Error: {error}"
         params = {
             "since": start,
             "until": end,
@@ -117,22 +160,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "team_id": team_id,
             "page": page,
         }
-        items, cut = shaping.limit_items(
-            shaping.rows(await ctx.client.get_account("/csat_survey_responses", params=params)), ctx.settings.max_items
-        )
+        try:
+            session = await context.session()
+            require_admin(session)
+            items, cut = limited(
+                CsatResponse.parse_rows(await session.get("/csat_survey_responses", params)), context.max_items
+            )
+        except ChatwootError as error:
+            return to_tool_error(error)
         return {
-            **page_info(page, cut, ctx.settings.max_items),
-            "responses": [
-                {
-                    "id": r.get("id"),
-                    "rating": r.get("rating"),
-                    "feedback": shaping.wrap_untrusted(r.get("feedback_message"), ctx.settings.max_text_chars),
-                    "conversation_id": r.get("conversation_id"),
-                    "contact": shaping.person(r.get("contact"), "id", "name"),
-                    "agent": shaping.person(r.get("assigned_agent"), "id", "name"),
-                    "created_at": r.get("created_at"),
-                }
-                for r in items
-                if isinstance(r, dict)
-            ],
+            **page_info(page, cut, context.max_items),
+            "responses": [shape_csat(r, max_chars=context.max_chars) for r in items],
         }

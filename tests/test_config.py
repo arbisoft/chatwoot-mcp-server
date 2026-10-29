@@ -1,95 +1,88 @@
 import pytest
 
-from chatwoot_mcp.config import ConfigError, Settings
+from chatwoot_mcp.config import (
+    DEFAULT_ENABLED_MODULES,
+    ConfigError,
+    Settings,
+    module_flag,
+)
+from chatwoot_mcp.env_flags import parse_flag
+
+BASE_ENV = {"CHATWOOT_URL": "https://chat.example.com/", "CHATWOOT_ACCOUNT_ID": "3"}
 
 
-def env(**overrides):
-    base = {"CHATWOOT_BASE_URL": "https://chat.example.com", "CHATWOOT_ACCOUNT_ID": "1"}
-    base.update(overrides)
-    return base
+def test_defaults():
+    settings = Settings.from_env(BASE_ENV)
+    assert settings.chatwoot_url == "https://chat.example.com"
+    assert settings.account_id == 3
+    assert settings.http_token is None and not settings.read_only and not settings.filter_tools_by_role
+    assert settings.enabled_modules == DEFAULT_ENABLED_MODULES
+    assert not settings.module_enabled("replies") and not settings.module_enabled("macros")
+    assert settings.browser_url == "https://chat.example.com"
 
 
-def test_minimal_settings_use_safe_defaults():
-    s = Settings.from_env(env())
-    assert s.base_url == "https://chat.example.com"
-    assert s.account_id == 1
-    assert s.enable_writes is False
-    assert s.max_items == 25
-    assert s.max_text_chars == 2000
-    assert s.timeout_seconds == 30.0
-
-
-def test_trailing_slash_is_removed_from_the_base_url():
-    assert Settings.from_env(env(CHATWOOT_BASE_URL="https://chat.example.com/")).base_url == "https://chat.example.com"
-
-
-def test_base_url_must_be_http_or_https():
-    with pytest.raises(ConfigError, match="CHATWOOT_BASE_URL"):
-        Settings.from_env(env(CHATWOOT_BASE_URL="chat.example.com"))
-    with pytest.raises(ConfigError, match="CHATWOOT_BASE_URL"):
-        Settings.from_env(env(CHATWOOT_BASE_URL="ftp://chat.example.com"))
-
-
-def test_base_url_is_required():
-    with pytest.raises(ConfigError, match="CHATWOOT_BASE_URL"):
-        Settings.from_env({"CHATWOOT_ACCOUNT_ID": "1"})
-
-
-@pytest.mark.parametrize("value", ["", "abc", "0", "-3", "1.5", " 1"])
-def test_account_id_must_be_a_positive_integer(value):
-    with pytest.raises(ConfigError, match="CHATWOOT_ACCOUNT_ID"):
-        Settings.from_env(env(CHATWOOT_ACCOUNT_ID=value))
-
-
-def test_account_id_is_required():
-    with pytest.raises(ConfigError, match="CHATWOOT_ACCOUNT_ID"):
-        Settings.from_env({"CHATWOOT_BASE_URL": "https://chat.example.com"})
+def test_every_value_is_read():
+    settings = Settings.from_env(
+        {
+            **BASE_ENV,
+            "CHATWOOT_HTTP_TOKEN": " key ",
+            "CHATWOOT_PUBLIC_URL": "https://public.example.com/",
+            "CHATWOOT_READ_ONLY": "yes",
+            "CHATWOOT_FILTER_TOOLS_BY_ROLE": "1",
+            "CHATWOOT_CONFIRM_TTL_SECONDS": "60",
+            "CHATWOOT_MAX_ITEMS": "5",
+            "CHATWOOT_MAX_TEXT_CHARS": "50",
+            "CHATWOOT_TIMEOUT_SECONDS": "2.5",
+            "CHATWOOT_CONNECT_TIMEOUT_SECONDS": "1",
+            "MCP_HTTP_HOST": "0.0.0.0",
+            "MCP_HTTP_PORT": "9000",
+            "CHATWOOT_ENABLE_REPLIES": "true",
+            "CHATWOOT_ENABLE_REPORTS": "false",
+            "CHATWOOT_HTTP_SHARED_TOKEN_ROUTE": "on",
+        }
+    )
+    assert settings.http_token == "key" and settings.browser_url == "https://public.example.com"
+    assert settings.read_only and settings.filter_tools_by_role and settings.http_shared_token_route
+    assert (settings.confirm_ttl_seconds, settings.max_items, settings.max_text_chars) == (60, 5, 50)
+    assert (settings.timeout_seconds, settings.connect_timeout_seconds) == (2.5, 1.0)
+    assert (settings.http_host, settings.http_port) == ("0.0.0.0", 9000)
+    assert settings.module_enabled("replies") and not settings.module_enabled("reports")
 
 
 @pytest.mark.parametrize(
-    ("value", "expected"),
-    [("true", True), ("TRUE", True), ("1", True), ("false", False), ("0", False), ("", False)],
+    ("overrides", "message"),
+    [
+        ({"CHATWOOT_URL": ""}, "CHATWOOT_URL"),
+        ({"CHATWOOT_URL": "chat.example.com"}, "CHATWOOT_URL"),
+        ({"CHATWOOT_PUBLIC_URL": "ftp://x"}, "CHATWOOT_PUBLIC_URL"),
+        ({"CHATWOOT_ACCOUNT_ID": ""}, "CHATWOOT_ACCOUNT_ID is required"),
+        ({"CHATWOOT_ACCOUNT_ID": "0"}, "CHATWOOT_ACCOUNT_ID"),
+        ({"CHATWOOT_ACCOUNT_ID": "1.5"}, "CHATWOOT_ACCOUNT_ID"),
+        ({"CHATWOOT_MAX_ITEMS": "-1"}, "CHATWOOT_MAX_ITEMS"),
+        ({"CHATWOOT_TIMEOUT_SECONDS": "nan"}, "CHATWOOT_TIMEOUT_SECONDS"),
+        ({"CHATWOOT_TIMEOUT_SECONDS": "soon"}, "not a number"),
+        ({"MCP_HTTP_PORT": "70000"}, "MCP_HTTP_PORT"),
+    ],
 )
-def test_enable_writes_flag(value, expected):
-    assert Settings.from_env(env(CHATWOOT_MCP_ENABLE_WRITES=value)).enable_writes is expected
+def test_bad_values_stop_the_server_at_start_up(overrides, message):
+    with pytest.raises(ConfigError, match=message):
+        Settings.from_env({**BASE_ENV, **overrides})
 
 
-def test_enable_writes_rejects_unknown_words():
-    with pytest.raises(ConfigError, match="CHATWOOT_MCP_ENABLE_WRITES"):
-        Settings.from_env(env(CHATWOOT_MCP_ENABLE_WRITES="yes please"))
+@pytest.mark.parametrize(("raw", "expected"), [("true ", True), (" ON", True), ("1", True), ("no", False), ("", False)])
+def test_flags_are_stripped_so_a_trailing_space_never_re_enables_writes(raw, expected):
+    assert parse_flag(raw) is expected
 
 
-@pytest.mark.parametrize("name", ["CHATWOOT_MCP_MAX_ITEMS", "CHATWOOT_MCP_MAX_TEXT_CHARS"])
-@pytest.mark.parametrize("value", ["0", "-1", "ten", "5.5", "100001"])
-def test_limits_must_be_sensible_integers(name, value):
-    with pytest.raises(ConfigError, match=name):
-        Settings.from_env(env(**{name: value}))
+def test_a_blank_flag_keeps_its_default():
+    assert parse_flag("  ", default=True) is True
+    assert module_flag("help_center") == "CHATWOOT_ENABLE_HELP_CENTER"
 
 
-def test_limits_can_be_changed():
-    s = Settings.from_env(env(CHATWOOT_MCP_MAX_ITEMS="10", CHATWOOT_MCP_MAX_TEXT_CHARS="500"))
-    assert (s.max_items, s.max_text_chars) == (10, 500)
-
-
-@pytest.mark.parametrize("value", ["0", "-2", "soon", "601"])
-def test_timeout_must_be_between_zero_and_ten_minutes(value):
-    with pytest.raises(ConfigError, match="CHATWOOT_MCP_TIMEOUT_SECONDS"):
-        Settings.from_env(env(CHATWOOT_MCP_TIMEOUT_SECONDS=value))
-
-
-def test_actions_are_off_by_default_and_the_confirm_window_is_five_minutes():
-    s = Settings.from_env(env())
-    assert s.enable_actions is False and s.confirm_ttl_seconds == 300
-
-
-def test_actions_can_be_switched_on():
-    assert Settings.from_env(env(CHATWOOT_MCP_ENABLE_ACTIONS="true")).enable_actions is True
-    with pytest.raises(ConfigError, match="CHATWOOT_MCP_ENABLE_ACTIONS"):
-        Settings.from_env(env(CHATWOOT_MCP_ENABLE_ACTIONS="maybe"))
-
-
-@pytest.mark.parametrize("value", ["29", "3601", "soon", "0", "-5"])
-def test_the_confirm_window_must_be_between_thirty_seconds_and_an_hour(value):
-    with pytest.raises(ConfigError, match="CHATWOOT_MCP_CONFIRM_TTL_SECONDS"):
-        Settings.from_env(env(CHATWOOT_MCP_CONFIRM_TTL_SECONDS=value))
-    assert Settings.from_env(env(CHATWOOT_MCP_CONFIRM_TTL_SECONDS="60")).confirm_ttl_seconds == 60
+def test_http_mode_refuses_a_shared_key_without_the_explicit_opt_in():
+    with pytest.raises(ConfigError, match="CHATWOOT_HTTP_TOKEN is set in http mode"):
+        Settings.from_env({**BASE_ENV, "CHATWOOT_HTTP_TOKEN": "k"}).check_http()
+    with pytest.raises(ConfigError, match="needs CHATWOOT_HTTP_TOKEN"):
+        Settings.from_env({**BASE_ENV, "CHATWOOT_HTTP_SHARED_TOKEN_ROUTE": "true"}).check_http()
+    Settings.from_env({**BASE_ENV}).check_http()
+    Settings.from_env({**BASE_ENV, "CHATWOOT_HTTP_TOKEN": "k", "CHATWOOT_HTTP_SHARED_TOKEN_ROUTE": "true"}).check_http()
