@@ -1,6 +1,6 @@
 """Platform-mode HTTP entry point.
 
-``zammad-mcp http`` lands here when ``COGNITO_USER_POOL_ID`` is set. It serves:
+``chatwoot-mcp http`` lands here when ``COGNITO_USER_POOL_ID`` is set. It serves:
 
 - ``/mcp`` (and the OAuth routes at ``/``): FastMCP's Cognito provider is the
   only auth layer. It is a full OAuth 2.0 authorization server (dynamic

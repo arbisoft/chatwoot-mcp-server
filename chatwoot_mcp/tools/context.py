@@ -10,10 +10,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp.server.auth import AuthCheck
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootClient
 from chatwoot_mcp.config import Settings
@@ -21,6 +22,10 @@ from chatwoot_mcp.confirmations import ConfirmationError, Confirmations
 from chatwoot_mcp.credentials import ChatwootCredential, CredentialProvider
 from chatwoot_mcp.shaping import Links
 from chatwoot_mcp.tiers import Tier, tier_allows
+
+ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
+ContactId = Annotated[int, Field(ge=1, description="The customer's id in Chatwoot. Use search_contacts to find it.")]
+Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,15 @@ def as_dict(value: Any) -> dict[str, Any]:
 def limited(items: list[Any], maximum: int) -> tuple[list[Any], bool]:
     """The first ``maximum`` items, and whether any were cut."""
     return items[:maximum], len(items) > maximum
+
+
+def local_page(items: list[Any], page: int, size: int) -> tuple[list[Any], dict[str, Any]]:
+    """One page of a list Chatwoot returns whole, and the page fields to return with it."""
+    start = (page - 1) * size
+    info: dict[str, Any] = {"page": page}
+    if len(items) > start + size:
+        info["next_page"] = page + 1
+    return items[start : start + size], info
 
 
 def page_info(page: int, cut: bool, maximum: int) -> dict[str, Any]:

@@ -11,6 +11,7 @@ names and steps are written by administrators and returned as they are.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -24,6 +25,7 @@ from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
     PREPARE,
     READ,
+    ConversationId,
     ToolContext,
     confirmation_refusal,
     prepared,
@@ -41,7 +43,6 @@ OUTWARD_STEPS = {
 }
 
 MacroId = Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")]
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
 
 
 def macro_payload(macro_id: int, conversation_id: int) -> dict[str, Any]:
@@ -71,8 +72,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         """
         try:
             session = await context.session()
-            macro = Macro.parse(payload(await session.get(f"/macros/{macro_id}")))
-            chat = Conversation.parse(await session.get(f"/conversations/{conversation_id}"))
+            macro_data, chat_data = await asyncio.gather(
+                session.get(f"/macros/{macro_id}"), session.get(f"/conversations/{conversation_id}")
+            )
+            macro = Macro.parse(payload(macro_data))
+            chat = Conversation.parse(chat_data)
         except ChatwootError as error:
             return to_tool_error(error)
         steps = macro_steps(macro)

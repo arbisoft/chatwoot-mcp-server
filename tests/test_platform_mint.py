@@ -198,3 +198,15 @@ async def test_keyed_locks_are_dropped_when_idle():
     async with locks.hold("a"):
         assert len(locks) == 1
     assert len(locks) == 0
+
+
+async def test_a_profile_that_is_not_json_is_a_plain_error_not_a_crash(store, clock):
+    from chatwoot_mcp.client.errors import UnexpectedResponseError
+
+    chatwoot = FakeSsoChatwoot()
+    chatwoot.add("ada@example.com")
+    original = chatwoot._profile
+    chatwoot._profile = lambda request: httpx.Response(200, text="<html>login</html>")
+    with pytest.raises(UnexpectedResponseError, match="not JSON"):
+        await minter_for(chatwoot, store, clock).token_for(ADA)
+    chatwoot._profile = original

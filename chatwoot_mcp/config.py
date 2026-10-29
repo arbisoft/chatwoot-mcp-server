@@ -82,28 +82,28 @@ class Settings:
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         env = os.environ if environ is None else environ
-        chatwoot_url = _read(env, "CHATWOOT_URL").rstrip("/")
+        chatwoot_url = read_setting(env, "CHATWOOT_URL").rstrip("/")
         if not _URL.fullmatch(chatwoot_url):
             raise ConfigError(f"CHATWOOT_URL must be an http:// or https:// address, got {chatwoot_url!r}")
-        public_url = _read(env, "CHATWOOT_PUBLIC_URL").rstrip("/")
+        public_url = read_setting(env, "CHATWOOT_PUBLIC_URL").rstrip("/")
         if public_url and not _URL.fullmatch(public_url):
             raise ConfigError(f"CHATWOOT_PUBLIC_URL must be an http:// or https:// address, got {public_url!r}")
         return cls(
             chatwoot_url=chatwoot_url,
             account_id=_required_int(env, "CHATWOOT_ACCOUNT_ID"),
-            http_token=_read(env, "CHATWOOT_HTTP_TOKEN") or None,
+            http_token=read_setting(env, "CHATWOOT_HTTP_TOKEN") or None,
             timeout_seconds=_positive_float(env, "CHATWOOT_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
             connect_timeout_seconds=_positive_float(
                 env, "CHATWOOT_CONNECT_TIMEOUT_SECONDS", DEFAULT_CONNECT_TIMEOUT_SECONDS
             ),
-            http_host=_read(env, "MCP_HTTP_HOST") or DEFAULT_HTTP_HOST,
+            http_host=read_setting(env, "MCP_HTTP_HOST") or DEFAULT_HTTP_HOST,
             http_port=_port(env, "MCP_HTTP_PORT", DEFAULT_HTTP_PORT),
             public_url=public_url,
             read_only=env_flag("CHATWOOT_READ_ONLY", environ=env),
             filter_tools_by_role=env_flag("CHATWOOT_FILTER_TOOLS_BY_ROLE", environ=env),
-            confirm_ttl_seconds=_positive_int(env, "CHATWOOT_CONFIRM_TTL_SECONDS", DEFAULT_CONFIRM_TTL_SECONDS),
-            max_items=_positive_int(env, "CHATWOOT_MAX_ITEMS", DEFAULT_MAX_ITEMS),
-            max_text_chars=_positive_int(env, "CHATWOOT_MAX_TEXT_CHARS", DEFAULT_MAX_TEXT_CHARS),
+            confirm_ttl_seconds=positive_int_setting(env, "CHATWOOT_CONFIRM_TTL_SECONDS", DEFAULT_CONFIRM_TTL_SECONDS),
+            max_items=positive_int_setting(env, "CHATWOOT_MAX_ITEMS", DEFAULT_MAX_ITEMS),
+            max_text_chars=positive_int_setting(env, "CHATWOOT_MAX_TEXT_CHARS", DEFAULT_MAX_TEXT_CHARS),
             enabled_modules=frozenset(
                 module
                 for module in TOOL_MODULES
@@ -117,12 +117,12 @@ def module_flag(module: str) -> str:
     return f"CHATWOOT_ENABLE_{module.upper()}"
 
 
-def _read(env: Mapping[str, str], name: str) -> str:
+def read_setting(env: Mapping[str, str], name: str) -> str:
     return env.get(name, "").strip()
 
 
 def _positive_float(env: Mapping[str, str], name: str, default: float) -> float:
-    raw = _read(env, name)
+    raw = read_setting(env, name)
     if not raw:
         return default
     try:
@@ -134,8 +134,8 @@ def _positive_float(env: Mapping[str, str], name: str, default: float) -> float:
     return value
 
 
-def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
-    raw = _read(env, name)
+def positive_int_setting(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = read_setting(env, name)
     if not raw:
         return default
     if not (raw.isascii() and raw.isdigit()) or int(raw) < 1:
@@ -144,13 +144,13 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
 
 
 def _required_int(env: Mapping[str, str], name: str) -> int:
-    if not _read(env, name):
+    if not read_setting(env, name):
         raise ConfigError(f"{name} is required")
-    return _positive_int(env, name, 0)
+    return positive_int_setting(env, name, 0)
 
 
 def _port(env: Mapping[str, str], name: str, default: int) -> int:
-    raw = _read(env, name)
+    raw = read_setting(env, name)
     if not raw:
         return default
     if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= 65535:

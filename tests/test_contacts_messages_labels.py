@@ -147,3 +147,11 @@ async def test_contact_labels(settings, fake):
         "conversation_id": 9,
         "labels": ["bug"],
     }
+
+
+async def test_contact_notes_are_paged_because_chatwoot_returns_them_all(settings, fake):
+    fake.on("GET", "/contacts/4/notes", json=[{"id": n, "content": "x"} for n in range(1, 31)])
+    first = await data(settings, fake, "get_contact_notes", {"contact_id": 4})
+    second = await data(settings, fake, "get_contact_notes", {"contact_id": 4, "page": 2})
+    assert len(first["notes"]) == 25 and first["next_page"] == 2
+    assert [n["id"] for n in second["notes"]] == list(range(26, 31)) and "next_page" not in second

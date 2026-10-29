@@ -8,6 +8,7 @@ by administrators and returned as they are.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -16,13 +17,11 @@ from pydantic import Field
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Label, rows
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import ADD, OVERWRITE, READ, ChatwootSession, ToolContext
+from chatwoot_mcp.tools.context import ADD, OVERWRITE, READ, ContactId, ConversationId, ToolContext
 
 MODULE = "labels"
 MAX_LABELS_PER_CALL = 20
 
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
-ContactId = Annotated[int, Field(ge=1, description="The customer's id in Chatwoot.")]
 Labels = Annotated[list[str], Field(min_length=1, max_length=MAX_LABELS_PER_CALL, description="Existing label titles.")]
 
 
@@ -52,18 +51,16 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     if not context.writes_enabled:
         return
 
-    async def unknown_labels(session: ChatwootSession, labels: list[str]) -> list[str]:
-        titles = {label.title for label in Label.parse_rows(await session.get("/labels"))}
-        return sorted({label for label in labels if label not in titles})
-
     async def add(path: str, key: str, item_id: int, labels: list[str]) -> dict[str, Any] | str:
         wanted = [label.lower() for label in labels]
         try:
             session = await context.session()
-            unknown = await unknown_labels(session, wanted)
+            catalogue, current = await asyncio.gather(session.get("/labels"), session.get(path))
+            titles = {label.title for label in Label.parse_rows(catalogue)}
+            unknown = sorted({label for label in wanted if label not in titles})
             if unknown:
                 return f"Error: these labels do not exist: {', '.join(unknown)}; use list_labels to see the real ones"
-            merged = list(dict.fromkeys([*current_labels(await session.get(path)), *wanted]))
+            merged = list(dict.fromkeys([*current_labels(current), *wanted]))
             saved = current_labels(await session.post(path, {"labels": merged}))
         except ChatwootError as error:
             return to_tool_error(error)

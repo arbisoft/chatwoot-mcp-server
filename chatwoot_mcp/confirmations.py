@@ -15,7 +15,6 @@ Fernet-encrypted), shared by every replica. The per-identity limit is kept in ea
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -53,26 +52,26 @@ class ConfirmationBackend(Protocol):
 
 
 class MemoryConfirmationBackend:
+    """No lock: no method awaits. The full-store sweep runs only when the cap is reached."""
+
     def __init__(self, clock: Clock = time.time, *, max_entries: int = MAX_MEMORY_ENTRIES) -> None:
         self._clock = clock
         self._max_entries = max_entries
         self._values: dict[str, tuple[str, float]] = {}
-        self._lock = asyncio.Lock()
 
     async def put(self, key: str, value: str, ttl_seconds: int) -> None:
-        async with self._lock:
-            now = self._clock()
-            live = {k: entry for k, entry in self._values.items() if entry[1] > now and k != key}
-            if len(live) >= self._max_entries:
+        now = self._clock()
+        self._values.pop(key, None)
+        if len(self._values) >= self._max_entries:
+            self._values = {k: entry for k, entry in self._values.items() if entry[1] > now}
+            if len(self._values) >= self._max_entries:
                 raise ConfirmationLimitError(
                     "too many actions are waiting for confirmation on this server; try again in a few minutes"
                 )
-            self._values = {**live, key: (value, now + ttl_seconds)}
+        self._values[key] = (value, now + ttl_seconds)
 
     async def take(self, key: str) -> str | None:
-        async with self._lock:
-            entry = self._values.get(key)
-            self._values = {k: v for k, v in self._values.items() if k != key}
+        entry = self._values.pop(key, None)
         if entry is None or entry[1] <= self._clock():
             return None
         return entry[0]

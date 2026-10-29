@@ -1,8 +1,9 @@
 """Conversations (chats): list, search, filter, open one, count, attachments; and, unless read-only, assign, status,
 priority and custom fields.
 
-None of the writes here reach the customer, so they run at once, like Zammad's ``update_ticket``. Replies and new
-conversations are in ``replies``, behind a confirm step.
+These writes run at once, like Zammad's ``update_ticket``, except resolving: Chatwoot then sends the customer a
+satisfaction survey when the inbox has one, so it is ``prepare_resolve_conversation`` then ``resolve_conversation``.
+Replies and new conversations are in ``replies``, behind the same confirm step.
 
 Chatwoot facts the writes rely on:
 
@@ -13,10 +14,13 @@ Chatwoot facts the writes rely on:
 - ``POST .../custom_attributes`` replaces the whole set unless ``merge`` is sent, which older versions ignore, so
   the current fields are sent along with the new ones.
 - The ``labels`` filter matches *any* of the labels.
+- A search (``q``) skips the status filter, so ``search_conversations`` applies the status itself.
+- Attachments come 100 per Chatwoot page; the tool splits each into pages of ``ATTACHMENTS_PER_PAGE``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -24,30 +28,36 @@ from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
-from chatwoot_mcp.client.models import Attachment, Conversation, CustomAttributeDefinition, payload
-from chatwoot_mcp.shaping import shape_attachment, shape_attributes, shape_conversation
+from chatwoot_mcp.client.models import Attachment, Conversation, CustomAttributeDefinition, Inbox, payload
+from chatwoot_mcp.shaping import compact, shape_attachment, shape_attributes, shape_conversation, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     OVERWRITE,
+    PREPARE,
     READ,
     ChatwootSession,
+    ConversationId,
+    Page,
     ToolContext,
     as_dict,
+    confirmation_refusal,
     limited,
     page_info,
+    prepared,
 )
 
 MODULE = "conversations"
+RESOLVE = "resolve_conversation"
+ATTACHMENTS_PER_PAGE = 25
+CHATWOOT_ATTACHMENTS_PER_PAGE = 100
 
 Status = Literal["all", "open", "resolved", "pending", "snoozed"]
-NewStatus = Literal["open", "pending", "snoozed", "resolved"]
+NewStatus = Literal["open", "pending", "snoozed"]
 Priority = Literal["none", "low", "medium", "high", "urgent"]
 Assignee = Literal["me", "unassigned", "all", "assigned"]
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
 InboxId = Annotated[int | None, Field(ge=1, description="Only chats in this inbox. Use list_inboxes to find ids.")]
 TeamId = Annotated[int | None, Field(ge=1, description="Only chats assigned to this team. Use list_teams for ids.")]
 Labels = Annotated[list[str] | None, Field(description="Only chats that carry at least one of these labels.")]
-Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
 FilterOperator = Literal[
     "equal_to",
     "not_equal_to",
@@ -101,9 +111,10 @@ def snooze_seconds(status: str, snoozed_until: str | None) -> int | None:
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
-    def conversation_list(data: Any, page: int) -> dict[str, Any]:
+    def conversation_list(data: Any, page: int, *, status: str = "all") -> dict[str, Any]:
         body = as_dict(as_dict(data).get("data", data))
-        items, cut = limited(Conversation.parse_rows(body), context.max_items)
+        rows = [c for c in Conversation.parse_rows(body) if status == "all" or c.status == status]
+        items, cut = limited(rows, context.max_items)
         return {
             **page_info(page, cut, context.max_items),
             "counts": body.get("meta"),
@@ -139,15 +150,19 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     @mcp.tool(**context.tool("Search conversations", READ, module=MODULE, tier=Tier.AGENT))
     async def search_conversations(
         query: Annotated[str, Field(min_length=1, max_length=200, description="Words to find in the messages.")],
-        status: Annotated[Status, Field(description="Which chats to search.")] = "all",
+        status: Annotated[Status, Field(description="Which chats to keep from each page of matches.")] = "all",
         inbox_id: InboxId = None,
         page: Page = 1,
     ) -> dict[str, Any] | str:
-        """Find chats whose messages contain the given words."""
-        params = {"q": query, "status": status, "inbox_id": inbox_id, "page": page}
+        """Find chats whose messages contain the given words.
+
+        Chatwoot searches every status, so a status other than all is applied to each page of matches: a page can
+        hold fewer chats, or none, while later pages still have some.
+        """
+        params = {"q": query, "inbox_id": inbox_id, "page": page}
         try:
             session = await context.session()
-            return conversation_list(await session.get("/conversations", params), page)
+            return conversation_list(await session.get("/conversations", params), page, status=status)
         except ChatwootError as error:
             return to_tool_error(error)
 
@@ -204,19 +219,21 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("List conversation attachments", READ, module=MODULE, tier=Tier.AGENT))
     async def list_conversation_attachments(conversation_id: ConversationId, page: Page = 1) -> dict[str, Any] | str:
-        """List the files sent in a chat (type, size, who sent it), newest first. Files are not opened."""
+        """List the files sent in a chat (type, size, who sent it), newest first, 25 per page. Files are not opened."""
+        per_chatwoot_page = CHATWOOT_ATTACHMENTS_PER_PAGE // ATTACHMENTS_PER_PAGE
+        chatwoot_page, part = divmod(page - 1, per_chatwoot_page)
         try:
             session = await context.session()
-            data = await session.get(f"/conversations/{conversation_id}/attachments", {"page": page})
-            items, cut = limited(Attachment.parse_rows(data), context.max_items)
+            data = await session.get(f"/conversations/{conversation_id}/attachments", {"page": chatwoot_page + 1})
+            rows = Attachment.parse_rows(data)
         except ChatwootError as error:
             return to_tool_error(error)
-        return {
-            "conversation_id": conversation_id,
-            **page_info(page, cut, context.max_items),
-            "total_count": as_dict(as_dict(data).get("meta")).get("total_count"),
-            "attachments": [shape_attachment(a) for a in items],
-        }
+        total = as_dict(as_dict(data).get("meta")).get("total_count")
+        start = part * ATTACHMENTS_PER_PAGE
+        out: dict[str, Any] = {"conversation_id": conversation_id, "page": page, "total_count": total}
+        if isinstance(total, int) and total > page * ATTACHMENTS_PER_PAGE:
+            out["next_page"] = page + 1
+        return {**out, "attachments": [shape_attachment(a) for a in rows[start : start + ATTACHMENTS_PER_PAGE]]}
 
     if not context.writes_enabled:
         return
@@ -257,7 +274,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             str | None, Field(description="Only for snoozed: when it wakes, as 2026-11-01T09:00:00+00:00.")
         ] = None,
     ) -> dict[str, Any] | str:
-        """Change a chat's status: open, pending, snoozed or resolved.
+        """Change a chat's status: open, pending or snoozed. To resolve a chat use prepare_resolve_conversation.
 
         Opening a chat also assigns it to the key's owner when their role is agent (Chatwoot's rule).
         """
@@ -278,6 +295,59 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             "status": done.get("current_status", status),
             "snoozed_until": done.get("snoozed_until"),
         }
+
+    @mcp.tool(**context.tool("Prepare to resolve conversation", PREPARE, module=MODULE, tier=Tier.AGENT))
+    async def prepare_resolve_conversation(conversation_id: ConversationId) -> dict[str, Any] | str:
+        """Preview resolving a chat and get a confirmation token. Nothing changes yet.
+
+        Resolving sends the customer a satisfaction survey when the inbox has surveys on; the preview says so. Show
+        it to the user, and only once they approve, call resolve_conversation with the token and the same id.
+        """
+        try:
+            session = await context.session()
+            chat = Conversation.parse(await session.get(f"/conversations/{conversation_id}"))
+            if chat.status == "resolved":
+                return f"Error: conversation {conversation_id} is already resolved"
+            inbox = Inbox.parse(await session.get(f"/inboxes/{chat.inbox_id}")) if chat.inbox_id else None
+        except ChatwootError as error:
+            return to_tool_error(error)
+        survey = bool(inbox and inbox.csat_survey_enabled)
+        preview = compact(
+            {
+                "conversation_id": conversation_id,
+                "from": chat.status,
+                "to": "resolved",
+                "customer": shape_person(chat.meta.sender, source="contact"),
+                "inbox": inbox.name if inbox else None,
+                "warning": "The customer will be sent a satisfaction survey." if survey else None,
+                "url": context.links.conversation(conversation_id),
+            }
+        )
+        return await prepared(
+            context, session, action=RESOLVE, payload={"conversation_id": conversation_id}, preview=preview
+        )
+
+    @mcp.tool(**context.tool("Resolve conversation", OVERWRITE, module=MODULE, tier=Tier.AGENT))
+    async def resolve_conversation(
+        confirmation_token: Annotated[str, Field(min_length=1, max_length=200, description="From the prepare tool.")],
+        conversation_id: ConversationId,
+    ) -> dict[str, Any] | str:
+        """Resolve the chat the user approved, from prepare_resolve_conversation's preview. The token works once."""
+        try:
+            session = await context.session()
+        except ChatwootError as error:
+            return to_tool_error(error)
+        refusal = await confirmation_refusal(
+            context, session, confirmation_token, action=RESOLVE, payload={"conversation_id": conversation_id}
+        )
+        if refusal:
+            return refusal
+        try:
+            path = f"/conversations/{conversation_id}/toggle_status"
+            done = payload(await session.post(path, {"status": "resolved"}))
+        except ChatwootError as error:
+            return to_tool_error(error)
+        return {"conversation_id": conversation_id, "status": done.get("current_status", "resolved")}
 
     @mcp.tool(**context.tool("Set conversation priority", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def set_conversation_priority(
@@ -317,10 +387,13 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         """Fill in a chat's custom fields, such as an order number. Fields not given stay as they are."""
         try:
             session = await context.session()
-            unknown = sorted(set(attributes) - await known_attribute_keys(session))
+            known, chat = await asyncio.gather(
+                known_attribute_keys(session), session.get(f"/conversations/{conversation_id}")
+            )
+            unknown = sorted(set(attributes) - known)
             if unknown:
                 return f"Error: these fields do not exist: {', '.join(unknown)}; use list_custom_attribute_definitions"
-            current = Conversation.parse(await session.get(f"/conversations/{conversation_id}")).custom_attributes
+            current = Conversation.parse(chat).custom_attributes
             body = {"custom_attributes": {**current, **attributes}}
             saved = as_dict(await session.post(f"/conversations/{conversation_id}/custom_attributes", body))
         except ChatwootError as error:

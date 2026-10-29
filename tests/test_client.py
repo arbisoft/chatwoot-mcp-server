@@ -5,6 +5,7 @@ import pytest
 
 from chatwoot_mcp.client import ChatwootClient, to_tool_error
 from chatwoot_mcp.client.errors import (
+    AccountAccessError,
     AuthError,
     ChatwootAPIError,
     ChatwootTransportError,
@@ -179,7 +180,9 @@ async def test_the_rejection_hook_can_swap_the_key_once():
 
     def handler(request):
         seen.append(request.headers["api_access_token"])
-        return httpx.Response(401 if request.headers["api_access_token"] == "old" else 200, json={"ok": 1})
+        if request.headers["api_access_token"] == "old":
+            return httpx.Response(401, json={"error": "Invalid Access Token"})
+        return httpx.Response(200, json={"ok": 1})
 
     async def renew(error, token):
         assert isinstance(error, AuthError) and token == "old"
@@ -208,6 +211,8 @@ async def test_the_rejection_hook_returning_nothing_keeps_the_error():
         (301, "Moved", RedirectedError, "redirected"),
         (401, "Invalid Access Token", AuthError, "rejected the key"),
         (401, "You are not authorized to do this action", PermissionDenied, "role does not allow"),
+        (401, "You are not authorized to access this account", AccountAccessError, "not a member"),
+        (401, "Account is suspended", AccountAccessError, "suspended"),
         (403, "Forbidden", PermissionDenied, "role does not allow"),
         (403, '{"error": "access_denied"}', GatewayDeniedError, "sign-in gateway"),
         (404, "nope", NotFoundError, "not found"),

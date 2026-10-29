@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import httpx
 
-# Chatwoot answers 401 both for a bad key and for a role that may not do something (Pundit's refusal);
-# only this text tells them apart.
+# Chatwoot answers 401 for a bad key, for a role that may not do something (Pundit's refusal), and for a user who
+# may not use the account (not a member, or the account is suspended); only the text tells them apart.
+INVALID_KEY_DETAIL = "Invalid Access Token"
 NOT_AUTHORIZED_DETAIL = "You are not authorized to do this action"
 DETAIL_LIMIT = 300
 
@@ -64,6 +65,10 @@ class PermissionDenied(ChatwootAPIError):
     """The caller's Chatwoot role does not allow this (HTTP 403, or Chatwoot's role-refusal 401)."""
 
 
+class AccountAccessError(PermissionDenied):
+    """HTTP 401 for the account, not the key: the user is not a member of it, or it is suspended."""
+
+
 class GatewayDeniedError(PermissionDenied):
     """HTTP 403 from an SSO edge in front of Chatwoot (``{"error": "access_denied"}``), not from Chatwoot's roles."""
 
@@ -95,7 +100,9 @@ def error_for_status(status_code: int, detail: str) -> ChatwootAPIError:
     if 300 <= status_code < 400:
         return RedirectedError(status_code, detail)
     if status_code == 401:
-        return (PermissionDenied if detail == NOT_AUTHORIZED_DETAIL else AuthError)(status_code, detail)
+        if detail == INVALID_KEY_DETAIL:
+            return AuthError(status_code, detail)
+        return (PermissionDenied if detail == NOT_AUTHORIZED_DETAIL else AccountAccessError)(status_code, detail)
     if status_code == 403:
         return (GatewayDeniedError if "access_denied" in detail.lower() else PermissionDenied)(status_code, detail)
     if status_code >= 500:
@@ -137,6 +144,11 @@ def to_tool_error(error: ChatwootError) -> str:
             return (
                 "Error: access denied by the sign-in gateway in front of Chatwoot (HTTP 403); "
                 "this account is not allowed to use this Chatwoot"
+            )
+        case AccountAccessError():
+            return (
+                f"Error: Chatwoot refused access to this account (HTTP 401: {error.detail}); the user is not a member "
+                "of it, or it is suspended"
             )
         case PermissionDenied():
             return f"Error: permission denied (HTTP {error.status_code}); your Chatwoot role does not allow this"

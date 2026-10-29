@@ -13,15 +13,24 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Contact, Conversation, Note, payload
 from chatwoot_mcp.shaping import shape_contact, shape_conversation, shape_note
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import CREATE, OVERWRITE, READ, ToolContext, as_dict, limited, page_info
+from chatwoot_mcp.tools.context import (
+    CREATE,
+    OVERWRITE,
+    READ,
+    ContactId,
+    Page,
+    ToolContext,
+    as_dict,
+    limited,
+    local_page,
+    page_info,
+)
 
 MODULE = "contacts"
 MAX_NOTE_CHARS = 5000
 PHONE = re.compile(r"\+[1-9][0-9]{6,14}")
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
-ContactId = Annotated[int, Field(ge=1, description="The customer's id in Chatwoot. Use search_contacts to find it.")]
-Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
 Email = Annotated[str | None, Field(max_length=254, description="The customer's email address.")]
 Phone = Annotated[str | None, Field(description="International format with no spaces, like +15550100.")]
 Identifier = Annotated[str | None, Field(max_length=255, description="Your own id for this customer.")]
@@ -85,7 +94,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("Get contact conversations", READ, module=MODULE, tier=Tier.AGENT))
     async def get_contact_conversations(contact_id: ContactId) -> dict[str, Any] | str:
-        """List every chat one customer has had."""
+        """List one customer's latest 25 chats, newest first (Chatwoot returns no more)."""
         try:
             session = await context.session()
             data = await session.get(f"/contacts/{contact_id}/conversations")
@@ -99,16 +108,17 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         }
 
     @mcp.tool(**context.tool("Get contact notes", READ, module=MODULE, tier=Tier.AGENT))
-    async def get_contact_notes(contact_id: ContactId) -> dict[str, Any] | str:
+    async def get_contact_notes(contact_id: ContactId, page: Page = 1) -> dict[str, Any] | str:
         """Read the team's notes about one customer, newest first. Customers never see these."""
         try:
             session = await context.session()
-            items, cut = limited(Note.parse_rows(await session.get(f"/contacts/{contact_id}/notes")), context.max_items)
+            notes = Note.parse_rows(await session.get(f"/contacts/{contact_id}/notes"))
         except ChatwootError as error:
             return to_tool_error(error)
+        items, info = local_page(notes, page, context.max_items)
         return {
             "contact_id": contact_id,
-            **page_info(1, cut, context.max_items),
+            **info,
             "notes": [shape_note(n, max_chars=context.max_chars) for n in items],
         }
 

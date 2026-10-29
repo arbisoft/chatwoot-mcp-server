@@ -5,7 +5,13 @@ from fastmcp import Client
 from fastmcp.server.auth import AccessToken
 
 from chatwoot_mcp.client import ChatwootClient
-from chatwoot_mcp.client.errors import AuthError, GatewayDeniedError, MissingTokenError, PermissionDenied
+from chatwoot_mcp.client.errors import (
+    AuthError,
+    GatewayDeniedError,
+    MissingTokenError,
+    PermissionDenied,
+    error_for_status,
+)
 from chatwoot_mcp.confirmations import ConfirmationError, Confirmations
 from chatwoot_mcp.platform.credentials import MintedCredentialProvider, is_role_denial, platform_tier_resolver
 from chatwoot_mcp.platform.identity import Identity
@@ -169,3 +175,22 @@ async def test_the_redis_store_speaks_the_key_value_protocol():
     assert await store.get("a") == "1" and await store.set_if_absent("a", "2", 10) is False
     assert await store.take("a") == "1"
     await store.delete("a")
+
+
+async def test_an_account_refusal_never_fetches_a_new_key(chatwoot):
+    keys = minter(chatwoot)
+    provider = MintedCredentialProvider(keys, identity_source=lambda: ADA)
+    key = (await provider.resolve()).token
+    handoffs = chatwoot.handoff_count()
+    assert await provider.on_rejected(error_for_status(401, "Account is suspended"), key) is None
+    assert chatwoot.handoff_count() == handoffs
+
+
+async def test_the_memory_store_sweeps_expired_entries_now_and_then():
+    now = [0.0]
+    store = MemoryKeyValue(lambda: now[0])
+    await store.set("old", "1", 10)
+    now[0] = 11
+    for n in range(MemoryKeyValue.SWEEP_EVERY):
+        await store.set(f"k{n}", "v", 10)
+    assert "old" not in store._values

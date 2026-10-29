@@ -19,12 +19,10 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Message
 from chatwoot_mcp.shaping import shape_message
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import CREATE, READ, ToolContext, as_dict, limited
+from chatwoot_mcp.tools.context import CREATE, READ, ConversationId, ToolContext, as_dict, limited
 
 MODULE = "messages"
 MAX_NOTE_CHARS = 5000
-
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:

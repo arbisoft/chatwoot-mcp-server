@@ -43,7 +43,13 @@ import anyio
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
-from chatwoot_mcp.client.errors import ChatwootError, ChatwootTransportError, error_detail, error_for_status
+from chatwoot_mcp.client.errors import (
+    ChatwootError,
+    ChatwootTransportError,
+    UnexpectedResponseError,
+    error_detail,
+    error_for_status,
+)
 from chatwoot_mcp.client.http import TOKEN_HEADER, USER_AGENT, cookieless_jar, is_valid_token
 from chatwoot_mcp.client.models import Profile as ChatwootProfile
 from chatwoot_mcp.credentials.base import PROFILE_PATH, profile_from
@@ -266,7 +272,11 @@ class KeySession:
         response = await self._send("GET", PROFILE_PATH, headers={TOKEN_HEADER: token})
         if not response.is_success:
             raise _bootstrap_error(response)
-        return ChatwootProfile.parse(response.json())
+        try:
+            body = response.json()
+        except ValueError:
+            raise UnexpectedResponseError("Chatwoot's profile answer is not JSON") from None
+        return ChatwootProfile.parse(body)
 
 
 class TokenEndpoint:

@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -121,42 +120,52 @@ class RedisKeyValue:
 
 
 class MemoryKeyValue:
-    """Process-local fallback when ``MCP_OAUTH_STORAGE_URL`` is unset: lost on restart, never shared."""
+    """Process-local fallback when ``MCP_OAUTH_STORAGE_URL`` is unset: lost on restart, never shared.
+
+    No lock: no method awaits, so each runs whole on the event loop. Expired entries are dropped when read, and the
+    rest every ``SWEEP_EVERY`` writes.
+    """
+
+    SWEEP_EVERY = 1000
 
     def __init__(self, clock: Clock = time.time) -> None:
         self._clock = clock
         self._values: dict[str, tuple[str, float]] = {}
-        self._lock = asyncio.Lock()
+        self._writes = 0
 
-    def _live(self) -> dict[str, tuple[str, float]]:
+    def _get(self, key: str) -> str | None:
+        entry = self._values.get(key)
+        if entry is not None and entry[1] <= self._clock():
+            del self._values[key]
+            return None
+        return entry[0] if entry else None
+
+    def _put(self, key: str, value: str, ttl_seconds: int) -> None:
         now = self._clock()
-        return {key: entry for key, entry in self._values.items() if entry[1] > now}
+        self._writes += 1
+        if self._writes % self.SWEEP_EVERY == 0:
+            self._values = {k: entry for k, entry in self._values.items() if entry[1] > now}
+        self._values[key] = (value, now + ttl_seconds)
 
     async def get(self, key: str) -> str | None:
-        entry = self._live().get(key)
-        return entry[0] if entry else None
+        return self._get(key)
 
     async def set(self, key: str, value: str, ttl_seconds: int) -> None:
-        async with self._lock:
-            self._values = {**self._live(), key: (value, self._clock() + ttl_seconds)}
+        self._put(key, value, ttl_seconds)
 
     async def set_if_absent(self, key: str, value: str, ttl_seconds: int) -> bool:
-        async with self._lock:
-            live = self._live()
-            if key in live:
-                return False
-            self._values = {**live, key: (value, self._clock() + ttl_seconds)}
-            return True
+        if self._get(key) is not None:
+            return False
+        self._put(key, value, ttl_seconds)
+        return True
 
     async def delete(self, key: str) -> None:
-        async with self._lock:
-            self._values = {k: entry for k, entry in self._live().items() if k != key}
+        self._values.pop(key, None)
 
     async def take(self, key: str) -> str | None:
-        async with self._lock:
-            entry = self._live().get(key)
-            self._values = {k: v for k, v in self._live().items() if k != key}
-        return entry[0] if entry else None
+        value = self._get(key)
+        self._values.pop(key, None)
+        return value
 
 
 class ValkeyConfirmationBackend:

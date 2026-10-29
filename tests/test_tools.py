@@ -55,6 +55,8 @@ WRITE_TOOLS = {
     "add_contact_labels",
     "remove_conversation_labels",
 }
+# On by default, but behind a confirm step: resolving can send the customer a satisfaction survey.
+RESOLVE_TOOLS = {"prepare_resolve_conversation", "resolve_conversation"}
 OPT_IN_READ_TOOLS = {"list_macros"}
 CONFIRMED_TOOLS = {
     "prepare_send_reply",
@@ -67,8 +69,8 @@ CONFIRMED_TOOLS = {
 ADMIN_TOOLS = {"get_report_summary", "get_report_by_group", "get_first_response_distribution", "list_csat_responses"}
 
 
-async def test_by_default_every_read_and_direct_write_exists_but_nothing_that_reaches_the_customer(settings, fake):
-    assert set(await tools(settings, fake)) == READ_TOOLS | WRITE_TOOLS
+async def test_by_default_nothing_reaches_the_customer_without_a_confirm_step(settings, fake):
+    assert set(await tools(settings, fake)) == READ_TOOLS | WRITE_TOOLS | RESOLVE_TOOLS
 
 
 async def test_read_only_leaves_only_reads(read_only, fake):
@@ -77,8 +79,8 @@ async def test_read_only_leaves_only_reads(read_only, fake):
 
 async def test_every_module_on_adds_replies_and_macros_with_their_confirm_steps(everything, fake):
     names = set(await tools(everything, fake))
-    assert names == READ_TOOLS | WRITE_TOOLS | OPT_IN_READ_TOOLS | CONFIRMED_TOOLS
-    assert len(names) == 47
+    assert names == READ_TOOLS | WRITE_TOOLS | RESOLVE_TOOLS | OPT_IN_READ_TOOLS | CONFIRMED_TOOLS
+    assert len(names) == 49
 
 
 async def test_a_module_switched_off_never_registers(settings, fake):
@@ -106,7 +108,9 @@ async def test_the_tools_that_send_cannot_be_called_without_a_confirmation_token
     for name in ("send_reply", "create_conversation", "run_macro"):
         assert "confirmation_token" in listed[name].inputSchema["required"], name
         assert listed[name].annotations.idempotentHint is False, name
+        assert listed[name].annotations.destructiveHint is True, name
         assert f"prepare_{name}" in listed
+    assert "confirmation_token" in listed["resolve_conversation"].inputSchema["required"]
 
 
 async def test_reports_need_an_admin_and_get_me_needs_nothing(everything, fake):
@@ -145,8 +149,8 @@ async def test_the_server_can_be_built_twice_without_sharing_state(settings, eve
         Client(build_server(settings, transport=fake)) as a,
         Client(build_server(everything, transport=fake)) as b,
     ):
-        assert len(await a.list_tools()) == len(READ_TOOLS | WRITE_TOOLS)
-        assert len(await b.list_tools()) == 47
+        assert len(await a.list_tools()) == len(READ_TOOLS | WRITE_TOOLS | RESOLVE_TOOLS)
+        assert len(await b.list_tools()) == 49
 
 
 def test_every_module_has_a_flag():

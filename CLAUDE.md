@@ -59,11 +59,15 @@ docker build --platform linux/amd64 .
 - Validate responses with `Model.parse(...)` / `parse_rows(...)` inside the tool's `try`, so an odd payload becomes an
   `Error:` string. Shape the result in `shaping.py`; never return Chatwoot's raw payload.
 - Text a customer, visitor or user wrote is untrusted: return it through `shaping.untrusted_field` or
-  `frame_untrusted`, never raw. Names only administrators write (inboxes, teams, labels, macros) are returned as is.
+  `frame_untrusted`, never raw. That includes agent names and canned responses: agents set their own names and any
+  agent can write a canned response. Names only administrators write (inboxes, teams, labels, macros) are returned
+  as is.
 - Anything that reaches the customer or runs many steps (replies, macros) is a `prepare_*` tool plus a confirming
   tool, through `prepared(...)` and `confirmation_refusal(...)` in `tools/context.py`, and its module is off by
-  default. Validate and look things up in the `prepare_*` tool, so a doomed action never gets a token. A failed send
-  says whether it surely did not go, may have gone, or went (`replies.send_failure`).
+  default. The one exception is resolving (it can send a CSAT survey): `prepare_resolve_conversation` and
+  `resolve_conversation` stay on with the other conversation writes. Validate and look things up in the `prepare_*`
+  tool, so a doomed action never gets a token. A failed send says whether it surely did not go, may have gone, or
+  went (`replies.send_failure`).
 - `get_me` returns an allow-list of fields: the profile holds the user's access and pubsub tokens.
 - Do not log request URLs (`httpx` is set to WARNING): a customer search puts an email or phone in the URL.
 - Update the README tool tables with every tool change; `tests/test_tools.py` checks they match.
@@ -71,8 +75,11 @@ docker build --platform linux/amd64 .
 ## Chatwoot facts worth knowing
 
 - Account routes are `/api/v1/accounts/{id}/...`; reports are `/api/v2/...`; the profile is `/api/v1/profile`.
-- Chatwoot answers **401** both for a bad key (`Invalid Access Token`) and for a role refusal
-  (`You are not authorized to do this action`); `error_for_status` reads the text.
+- Chatwoot answers **401** for a bad key (`Invalid Access Token`), a role refusal (`You are not authorized to do
+  this action`), and a user who may not use the account (not a member, or suspended). `error_for_status` reads the
+  text: only the first is a bad key, so only it fetches a new key.
+- Resolving a chat sends a CSAT survey when the inbox has surveys on. A search (`q`) skips the status filter.
+- Attachments come 100 per page; contact notes and a contact's chats (latest 25) come unpaged.
 - `POST .../labels` and `POST .../custom_attributes` **replace** the whole set, so writes read the current values
   first and send the result. Label titles are stored lower-case; unknown labels are refused instead of created.
 - `toggle_status` reads `snoozed_until` with `strptime('%s')`: send Unix seconds. An ISO string parses as 1970.

@@ -9,6 +9,7 @@ a failure says whether the message surely did not go, may have gone, or went.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -20,9 +21,10 @@ from chatwoot_mcp.client.models import Conversation, Inbox, Message, Person, pay
 from chatwoot_mcp.shaping import compact, shape_message, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
-    CREATE,
     IRREVERSIBLE,
     PREPARE,
+    ContactId,
+    ConversationId,
     ToolContext,
     as_dict,
     confirmation_refusal,
@@ -35,8 +37,6 @@ CREATE_CONVERSATION = "create_conversation"
 MAX_MESSAGE_CHARS = 5000
 SENT_TO_CUSTOMER = "This message will be sent to the customer and cannot be unsent."
 
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
-ContactId = Annotated[int, Field(ge=1, description="The customer's id. See search_contacts.")]
 InboxId = Annotated[int, Field(ge=1, description="The inbox to start the chat in. See list_inboxes.")]
 Content = Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="The message text.")]
 FirstMessage = Annotated[
@@ -139,8 +139,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return "Error: the message is empty"
         try:
             session = await context.session()
-            contact = Person.parse(payload(await session.get(f"/contacts/{contact_id}")))
-            inbox = Inbox.parse(await session.get(f"/inboxes/{inbox_id}"))
+            contact_data, inbox_data = await asyncio.gather(
+                session.get(f"/contacts/{contact_id}"), session.get(f"/inboxes/{inbox_id}")
+            )
+            contact = Person.parse(payload(contact_data))
+            inbox = Inbox.parse(inbox_data)
         except ChatwootError as error:
             return to_tool_error(error)
         preview = compact(
@@ -159,7 +162,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             preview=preview,
         )
 
-    @mcp.tool(**context.tool("Create conversation", CREATE, module=MODULE, tier=Tier.AGENT))
+    @mcp.tool(**context.tool("Create conversation", IRREVERSIBLE, module=MODULE, tier=Tier.AGENT))
     async def create_conversation(
         confirmation_token: ConfirmationToken, contact_id: ContactId, inbox_id: InboxId, message: FirstMessage = None
     ) -> dict[str, Any] | str:

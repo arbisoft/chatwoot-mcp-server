@@ -6,7 +6,7 @@ from fastmcp import Client
 
 from chatwoot_mcp.server import build_server
 from tests.conftest import ADMIN_PROFILE, RecordingTransport
-from tests.test_tools import CONFIRMED_TOOLS, OPT_IN_READ_TOOLS, READ_TOOLS, WRITE_TOOLS
+from tests.test_tools import CONFIRMED_TOOLS, OPT_IN_READ_TOOLS, READ_TOOLS, RESOLVE_TOOLS, WRITE_TOOLS
 
 DAYS = {"since": "2026-10-01", "until": "2026-10-02"}
 ARGUMENTS = {
@@ -29,7 +29,9 @@ ARGUMENTS = {
     "get_first_response_distribution": DAYS,
     "list_csat_responses": DAYS,
     "assign_conversation": {"conversation_id": 1, "team_id": 2},
-    "set_conversation_status": {"conversation_id": 1, "status": "resolved"},
+    "set_conversation_status": {"conversation_id": 1, "status": "pending"},
+    "prepare_resolve_conversation": {"conversation_id": 1},
+    "resolve_conversation": {"conversation_id": 1, "confirmation_token": "t"},
     "set_conversation_priority": {"conversation_id": 1, "priority": "low"},
     "set_conversation_custom_attributes": {"conversation_id": 1, "attributes": {"a": 1}},
     "add_private_note": {"conversation_id": 1, "content": "x"},
@@ -46,8 +48,8 @@ ARGUMENTS = {
     "prepare_run_macro": {"macro_id": 1, "conversation_id": 1},
     "run_macro": {"macro_id": 1, "conversation_id": 1, "confirmation_token": "t"},
 }
-EVERY_TOOL = sorted(READ_TOOLS | WRITE_TOOLS | OPT_IN_READ_TOOLS | CONFIRMED_TOOLS)
-CONFIRMING = {"send_reply", "create_conversation", "run_macro"}
+EVERY_TOOL = sorted(READ_TOOLS | WRITE_TOOLS | RESOLVE_TOOLS | OPT_IN_READ_TOOLS | CONFIRMED_TOOLS)
+CONFIRMING = {"send_reply", "create_conversation", "run_macro", "resolve_conversation"}
 REPORTS = {"get_report_summary", "get_report_by_group", "get_first_response_distribution", "list_csat_responses"}
 
 
@@ -55,7 +57,8 @@ def failing_chatwoot(status: int, body) -> RecordingTransport:
     """The profile answers (so the caller is a known admin); every other route fails the same way."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/v1/profile" and status != 401:
+        # The profile is outside the account, so only a bad key fails it.
+        if request.url.path == "/api/v1/profile" and body != {"error": "Invalid Access Token"}:
             return httpx.Response(200, json=ADMIN_PROFILE)
         return httpx.Response(status, json=body) if body is not None else httpx.Response(status, text="<html>oops")
 
@@ -77,19 +80,22 @@ async def call_all(settings, transport, names=EVERY_TOOL) -> dict[str, str]:
         (500, {"error": "boom"}, "server error"),
         (404, {"error": "missing"}, "not found"),
         (401, {"error": "Invalid Access Token"}, "rejected the key"),
+        (401, {"error": "Account is suspended"}, "refused access to this account"),
         (200, None, "not JSON"),
     ],
 )
 async def test_every_tool_turns_a_chatwoot_failure_into_a_plain_error(everything, status, body, needle):
     # get_me only reads the profile, which this fake answers unless the key is rejected.
-    names = EVERY_TOOL if status == 401 else [name for name in EVERY_TOOL if name != "get_me"]
+    names = (
+        EVERY_TOOL if status == 401 and "Invalid" in str(body) else [name for name in EVERY_TOOL if name != "get_me"]
+    )
     results = await call_all(everything, failing_chatwoot(status, body), names)
     for name, result in results.items():
         assert isinstance(result, str) and result.startswith("Error:"), f"{name} answered {result!r}"
         assert "Traceback" not in result and "secret-token" not in result, name
         if name in CONFIRMING:
             continue
-        if status == 401 and name in REPORTS:
+        if status == 401 and "Invalid" in str(body) and name in REPORTS:
             # The role cannot be read with a rejected key, so reports fail closed before calling Chatwoot.
             assert "role could not be determined" in result, f"{name}: {result}"
         else:

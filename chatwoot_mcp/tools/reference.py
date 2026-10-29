@@ -1,5 +1,6 @@
 """Reference lists: the names and ids other tools need (inboxes, agents, teams, labels, canned responses, custom
-fields) and the account itself. Everything here is written by administrators and returned as it is."""
+fields) and the account itself. Names administrators write (inboxes, teams, labels, custom fields) are returned as
+they are. Agents set their own names and any agent can write a canned response, so those are framed as untrusted."""
 
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from chatwoot_mcp.client.models import (
     Label,
     Team,
 )
-from chatwoot_mcp.shaping import compact
+from chatwoot_mcp.shaping import compact, truncate, untrusted_field
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, ToolContext, limited
 
@@ -33,6 +34,13 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         out: dict[str, Any] = {key: [compact(item.model_dump(include=set(fields))) for item in items]}
         if cut:
             out["truncated"] = f"Only the first {context.max_items} items are shown."
+        return out
+
+    def framed_agents(out: dict[str, Any], key: str) -> dict[str, Any]:
+        def frame(row: dict[str, Any], field: str) -> str | None:
+            return untrusted_field(row.get(field), source=f"agent_{field}", item_id=row.get("id"))
+
+        out[key] = [compact({**row, "name": frame(row, "name"), "email": frame(row, "email")}) for row in out[key]]
         return out
 
     @mcp.tool(**context.tool("List inboxes", READ, module=MODULE, tier=Tier.AGENT))
@@ -61,9 +69,10 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     async def list_agents() -> dict[str, Any] | str:
         """List the support staff with their ids, roles and availability."""
         try:
-            return await listing("/agents", "agents", Agent, ("id", "name", "email", "role", "availability_status"))
+            out = await listing("/agents", "agents", Agent, ("id", "name", "email", "role", "availability_status"))
         except ChatwootError as error:
             return to_tool_error(error)
+        return framed_agents(out, "agents")
 
     @mcp.tool(**context.tool("List teams", READ, module=MODULE, tier=Tier.AGENT))
     async def list_teams() -> dict[str, Any] | str:
@@ -87,7 +96,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             )
         except ChatwootError as error:
             return to_tool_error(error)
-        return {"team_id": team_id, **out}
+        return {"team_id": team_id, **framed_agents(out, "members")}
 
     @mcp.tool(**context.tool("List labels", READ, module=MODULE, tier=Tier.AGENT))
     async def list_labels() -> dict[str, Any] | str:
@@ -106,9 +115,19 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             )
         except ChatwootError as error:
             return to_tool_error(error)
-        for row in out["canned_responses"]:
-            if isinstance(row.get("content"), str):
-                row["content"] = row["content"][: context.max_chars]
+
+        def frame(row: dict[str, Any]) -> dict[str, Any]:
+            content, item_id = row.get("content"), row.get("id")
+            text = truncate(content, context.max_chars).text if isinstance(content, str) else content
+            return compact(
+                {
+                    **row,
+                    "short_code": untrusted_field(row.get("short_code"), source="canned_short_code", item_id=item_id),
+                    "content": untrusted_field(text, source="canned_response", item_id=item_id),
+                }
+            )
+
+        out["canned_responses"] = [frame(row) for row in out["canned_responses"]]
         return out
 
     @mcp.tool(**context.tool("List custom attribute definitions", READ, module=MODULE, tier=Tier.AGENT))

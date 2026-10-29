@@ -8,7 +8,7 @@ Chatwoot itself decides what each user can see and change.
 It lives in `mcp/` inside the Chatwoot fork but is its own Python project and never imports from the Rails app.
 Every tool calls an API route Chatwoot already has; nothing in Chatwoot is changed.
 
-Status: 47 tools in stdio and HTTP. Replies and macros are available behind opt-in flags. Platform mode (Moneta SSO,
+Status: 49 tools in stdio and HTTP. Replies and macros are available behind opt-in flags. Platform mode (Moneta SSO,
 each user's own key fetched automatically) is available.
 
 ## Modes
@@ -85,7 +85,8 @@ Platform mode adds its own settings; see [docs/platform-mode.md](docs/platform-m
 ## Tools
 
 Every tool carries all four MCP annotation hints and returns an `Error: ...` string instead of raising. Text that a
-customer, visitor or user wrote (messages, names, emails, phones, notes, survey feedback, custom attribute text) is
+customer, visitor or user wrote (messages, names, emails, phones, notes, survey feedback, custom attribute text,
+agent names and canned responses) is
 wrapped in `<untrusted_content source=... id=...>` with every `<` and `&` escaped inside, so it is read as data,
 never as instructions. Reports need a Chatwoot administrator (or a custom role with `report_manage`); everything else
 needs an agent. `get_me` is always on.
@@ -101,14 +102,14 @@ Read:
 | `list_custom_attribute_definitions` | reference | Custom fields for chats or customers, with their keys and allowed values. |
 | `get_account` | reference | The account's name, language, status and support address. |
 | `list_conversations` | conversations | Chats by status, assignee, inbox, team or label (any of them), newest activity first. |
-| `search_conversations` | conversations | Chats whose messages contain some words. |
+| `search_conversations` | conversations | Chats whose messages contain some words. Chatwoot searches every status, so a status filter is applied to each page of matches. |
 | `filter_conversations` | conversations | Chats by conditions joined by all or any: status, priority, assignee, team, inbox, labels, dates (including "no activity for N days"), subject or a custom field. |
 | `get_conversation` | conversations | One chat: status, customer, assignee, team, labels, custom fields, last message, link. |
 | `get_conversation_counts` | conversations | Mine, assigned, unassigned and all. |
-| `list_conversation_attachments` | conversations | Files sent in a chat: type, size, sender. No download links. |
+| `list_conversation_attachments` | conversations | Files sent in a chat: type, size, sender, 25 per page. No download links. |
 | `get_messages` | messages | A chat's messages, oldest first; the latest 20 by default, `before`/`after` to page. |
 | `search_contacts` / `list_contacts` | contacts | Find customers by name, email, phone or identifier; browse them by label. |
-| `get_contact` / `get_contact_conversations` / `get_contact_notes` | contacts | One customer, their chats, and the team's notes about them. |
+| `get_contact` / `get_contact_conversations` / `get_contact_notes` | contacts | One customer, their latest 25 chats, and the team's notes about them (paged). |
 | `get_conversation_labels` / `get_contact_labels` | labels | The labels on a chat or a customer. |
 | `search_help_articles` | help_center | Help-centre articles; drafts are included and marked by `status`. |
 | `get_report_summary` | reports | Counts, reply and resolution times for a period, with the previous period for comparison. |
@@ -117,12 +118,12 @@ Read:
 | `list_csat_responses` | reports | Satisfaction-survey answers: score and the customer's words, by score, agent, inbox or team. |
 | `list_macros` | macros (opt-in) | Macros the key's owner can run, with their steps. |
 
-Write (absent when `CHATWOOT_READ_ONLY=true`; none of these reach the customer, so they run at once):
+Write (absent when `CHATWOOT_READ_ONLY=true`; none of these reach the customer, so they run at once; resolving can, so it is a [two-step tool](#two-step-tools)):
 
 | Tool | Module | Description |
 |---|---|---|
 | `assign_conversation` | conversations | Assign to an agent, a team or both. The team is set first, because changing it drops an agent who is not in it. |
-| `set_conversation_status` | conversations | Open, pending, snoozed (with a wake time) or resolved. Opening also assigns the chat to the key's owner when their role is agent (Chatwoot's rule). |
+| `set_conversation_status` | conversations | Open, pending or snoozed (with a wake time). Opening also assigns the chat to the key's owner when their role is agent (Chatwoot's rule). |
 | `set_conversation_priority` | conversations | None, low, medium, high or urgent. |
 | `set_conversation_custom_attributes` | conversations | Fill in custom fields; only defined fields are accepted and the others are kept. |
 | `add_private_note` | messages | An internal note. Refuses to report success unless Chatwoot marked it private. |
@@ -134,7 +135,9 @@ Write (absent when `CHATWOOT_READ_ONLY=true`; none of these reach the customer, 
 ### Two-step tools
 
 A message to a customer cannot be unsent, and a macro can do several things at once, so these modules are **off by
-default** (`CHATWOOT_ENABLE_REPLIES=true`, `CHATWOOT_ENABLE_MACROS=true`) and every action takes two calls. The
+default** (`CHATWOOT_ENABLE_REPLIES=true`, `CHATWOOT_ENABLE_MACROS=true`) and every action takes two calls.
+Resolving a chat sends the customer a satisfaction survey when the inbox has one, so it takes two calls too, but it
+is on with the other conversation writes. The
 `prepare_*` tool changes nothing: it looks up what the action would touch and returns a preview and a
 `confirmation_token`. The assistant shows the preview to the user, and only after they agree calls the matching tool
 with the token and the same arguments. A token is bound to the caller, the action and the exact arguments, works
@@ -142,6 +145,8 @@ once and expires (`CHATWOOT_CONFIRM_TTL_SECONDS`).
 
 | Tool | Module | Description |
 |---|---|---|
+| `prepare_resolve_conversation` | conversations | Preview resolving a chat, with a warning when the inbox will send the customer a satisfaction survey. |
+| `resolve_conversation` | conversations | Resolve the approved chat. |
 | `prepare_send_reply` | replies | Preview a reply: who it goes to, on which channel. Refused if the chat cannot be replied to. |
 | `send_reply` | replies | Send the approved reply. Refuses to report success if Chatwoot marked it private; a failure says whether it went. |
 | `prepare_create_conversation` | replies | Preview a new chat with a customer in an inbox, with an optional first message. |
