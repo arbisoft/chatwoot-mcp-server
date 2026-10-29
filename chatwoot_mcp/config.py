@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from chatwoot_mcp.env_flags import env_flag
 
 DEFAULT_HTTP_HOST = "127.0.0.1"
-DEFAULT_HTTP_PORT = 8214
+DEFAULT_HTTP_PORT = 8215
 DEFAULT_CONFIRM_TTL_SECONDS = 600
 DEFAULT_MAX_ITEMS = 25
 DEFAULT_MAX_TEXT_CHARS = 2000

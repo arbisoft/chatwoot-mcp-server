@@ -19,6 +19,22 @@ from chatwoot_mcp.env_flags import env_flag
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
 REFRESH_TOKEN_FALLBACK_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_SCOPES = ("openid",)
+# The MCP clients people use, as in Pressingly/plane-mcp-server. MCP_ALLOWED_CLIENT_REDIRECT_URIS adds to these, so
+# onboarding a new client (Askii, say) is a config change, not a release.
+DEFAULT_REDIRECT_URIS = (
+    "http://localhost:*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*",
+    "http://127.0.0.1:*/*",
+    "cursor://anysphere.cursor-mcp/oauth/*",
+    "https://www.cursor.com/*",
+    "https://vscode.dev/redirect",
+    "https://insiders.vscode.dev/redirect",
+    "https://claude.ai/*",
+    "https://chatgpt.com/connector/oauth/*",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://oauth-redirect.googleusercontent.com/r/*",
+)
 REQUIRED = (
     "MCP_BASE_URL",
     "COGNITO_USER_POOL_ID",
@@ -62,7 +78,7 @@ class PlatformSettings:
     jwt_signing_key: str = field(default="", repr=False)
     storage_url: str = field(default="", repr=False)
     scopes: tuple[str, ...] = DEFAULT_SCOPES
-    allowed_redirect_uris: tuple[str, ...] = ()
+    allowed_redirect_uris: tuple[str, ...] = DEFAULT_REDIRECT_URIS
     allow_any_redirect_uri: bool = False
     access_token_ttl_seconds: int = DEFAULT_ACCESS_TOKEN_TTL_SECONDS
     upstream_auth_url: str = ""
@@ -80,7 +96,7 @@ class PlatformSettings:
     @property
     def redirect_allowlist(self) -> list[str] | None:
         """``None`` (only with the explicit opt-out) lets client registration accept any redirect URI."""
-        return list(self.allowed_redirect_uris) or None
+        return None if self.allow_any_redirect_uri else list(self.allowed_redirect_uris)
 
     @property
     def namespace(self) -> str:
@@ -101,14 +117,9 @@ class PlatformSettings:
             raise ConfigError(
                 "platform mode never uses a shared key: unset CHATWOOT_HTTP_TOKEN and CHATWOOT_HTTP_SHARED_TOKEN_ROUTE"
             )
-        allowed_redirect_uris = _split(_read(env, "MCP_ALLOWED_CLIENT_REDIRECT_URIS"))
+        extra_redirect_uris = _split(_read(env, "MCP_ALLOWED_CLIENT_REDIRECT_URIS"))
+        allowed_redirect_uris = tuple(dict.fromkeys(DEFAULT_REDIRECT_URIS + extra_redirect_uris))
         allow_any_redirect_uri = env_flag("MCP_ALLOW_ANY_REDIRECT_URI", environ=env)
-        if not allowed_redirect_uris and not allow_any_redirect_uri:
-            raise ConfigError(
-                "MCP_ALLOWED_CLIENT_REDIRECT_URIS is empty: set the redirect URIs MCP clients may register "
-                "(e.g. https://claude.ai/api/mcp/auth_callback,http://localhost:*/*), or set "
-                "MCP_ALLOW_ANY_REDIRECT_URI=true to accept any"
-            )
         default_email_domain = _read(env, "DEFAULT_EMAIL_DOMAIN").lower()
         if not HOSTNAME.match(default_email_domain):
             raise ConfigError(

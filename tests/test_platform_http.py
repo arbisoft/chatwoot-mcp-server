@@ -18,6 +18,7 @@ from chatwoot_mcp.credentials.header import API_KEY_MOUNT_PATH
 from chatwoot_mcp.platform import http as platform_http
 from chatwoot_mcp.platform.settings import (
     DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+    DEFAULT_REDIRECT_URIS,
     REFRESH_TOKEN_FALLBACK_SECONDS,
     PlatformSettings,
     community_settings,
@@ -69,7 +70,7 @@ def test_settings_read_the_platform_env():
     assert settings.internal_url == "http://chatwoot-web:3000"
     assert settings.default_email_domain == "askii.ai"
     assert settings.scopes == ("openid", "email", "profile")
-    assert settings.redirect_allowlist == ["https://claude.ai/api/mcp/auth_callback", "http://localhost:*/*"]
+    assert settings.redirect_allowlist == [*DEFAULT_REDIRECT_URIS, "https://claude.ai/api/mcp/auth_callback"]
     assert settings.access_token_ttl_seconds == 3600
     assert settings.log_level == "DEBUG"
     assert settings.cors_origins == ("https://a.test", "https://b.test")
@@ -85,7 +86,7 @@ def test_settings_defaults():
     )
 
     assert settings.scopes == ("openid",)
-    assert settings.redirect_allowlist == ["https://claude.ai/api/mcp/auth_callback"]
+    assert settings.redirect_allowlist == [*DEFAULT_REDIRECT_URIS, "https://claude.ai/api/mcp/auth_callback"]
     assert settings.access_token_ttl_seconds == DEFAULT_ACCESS_TOKEN_TTL_SECONDS
     assert settings.cors_origins == ("*",)
     assert settings.log_level == "INFO"
@@ -119,9 +120,6 @@ def test_settings_read_the_api_key_route_flag(raw, expected):
         ({"CHATWOOT_HTTP_TOKEN": "shared"}, "never uses a shared key"),
         ({"CHATWOOT_HTTP_SHARED_TOKEN_ROUTE": "true"}, "never uses a shared key"),
         ({"MCP_ACCESS_TOKEN_TTL_SECONDS": "0"}, "at least 1"),
-        ({"MCP_ALLOWED_CLIENT_REDIRECT_URIS": ""}, "MCP_ALLOW_ANY_REDIRECT_URI=true"),
-        ({"MCP_ALLOWED_CLIENT_REDIRECT_URIS": " , "}, "MCP_ALLOW_ANY_REDIRECT_URI=true"),
-        ({"MCP_ALLOWED_CLIENT_REDIRECT_URIS": "", "MCP_ALLOW_ANY_REDIRECT_URI": "false"}, "is empty"),
         ({"DEFAULT_EMAIL_DOMAIN": "user@askii.ai"}, "bare domain"),
         ({"DEFAULT_EMAIL_DOMAIN": "https://askii.ai"}, "bare domain"),
         ({"DEFAULT_EMAIL_DOMAIN": "askii.ai."}, "bare domain"),
@@ -341,7 +339,7 @@ def test_run_mounts_the_personal_token_route_with_a_warning(monkeypatch, platfor
     assert len(warnings) == 1
     assert "bypassing the SSO proxy (mPass/oauth2-proxy) and the corporate-ID gate" in warnings[0].getMessage()
     assert "is disabled" not in caplog.text
-    assert "serving /mcp, /http/api-key/mcp, /healthz on :8214" in caplog.text
+    assert "serving /mcp, /http/api-key/mcp, /healthz on :8215" in caplog.text
 
 
 def test_run_exits_on_a_bad_env(monkeypatch, platform_env):
@@ -392,11 +390,10 @@ def test_startup_warns_when_links_would_point_at_the_internal_url(caplog):
     assert "accepts any redirect_uri" in caplog.text
 
 
-def test_an_unset_allowlist_refuses_to_start():
+def test_an_unset_allowlist_allows_the_common_mcp_clients_only():
     env = {key: value for key, value in ENV.items() if key != "MCP_ALLOWED_CLIENT_REDIRECT_URIS"}
 
-    with pytest.raises(ConfigError, match="MCP_ALLOWED_CLIENT_REDIRECT_URIS is empty"):
-        PlatformSettings.from_env(env)
+    assert PlatformSettings.from_env(env).redirect_allowlist == list(DEFAULT_REDIRECT_URIS)
 
 
 def test_the_explicit_opt_out_starts_with_a_warning(caplog):

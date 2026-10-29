@@ -118,8 +118,8 @@ Without `MCP_OAUTH_STORAGE_URL` everything lives in process: it is lost on resta
 | `DEFAULT_EMAIL_DOMAIN` | required | Synthetic domain of unverified users (a bare domain); `<cognito:username>@` it is refused |
 | `CHATWOOT_PUBLIC_URL` | `CHATWOOT_URL` | Base URL for the `url` links in results |
 | `MCP_OAUTH_STORAGE_URL` | unset | Valkey URL for OAuth state, the key cache and confirmations |
-| `MCP_ALLOWED_CLIENT_REDIRECT_URIS` | required | Comma-separated redirect URI patterns (fnmatch) for dynamic client registration, e.g. `https://claude.ai/api/mcp/auth_callback,http://localhost:*/*`. An empty value refuses to start |
-| `MCP_ALLOW_ANY_REDIRECT_URI` | `false` | `true` (with no allow-list) accepts any redirect URI, with a startup warning |
+| `MCP_ALLOWED_CLIENT_REDIRECT_URIS` | built-in list | Comma-separated redirect URI patterns (fnmatch) added to the built-in list (`DEFAULT_REDIRECT_URIS` in `platform/settings.py`: localhost, Cursor, VS Code, Claude.ai, ChatGPT, Gemini), e.g. Askii's callback |
+| `MCP_ALLOW_ANY_REDIRECT_URI` | `false` | `true` accepts any redirect URI, with a startup warning |
 | `COGNITO_UPSTREAM_AUTH_URL` | discovered | Send users to an auth proxy's `/authorize` instead of Cognito's hosted UI |
 | `COGNITO_UPSTREAM_TOKEN_URL` | discovered | Exchange codes through an auth proxy's `/token` |
 | `MCP_OIDC_SCOPES` | `openid` | Upstream scopes, space- or comma-separated |

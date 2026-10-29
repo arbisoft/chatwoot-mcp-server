@@ -54,7 +54,7 @@ Hosted:
 
 ```bash
 CHATWOOT_URL=http://chatwoot-web:3000 CHATWOOT_ACCOUNT_ID=1 MCP_HTTP_HOST=0.0.0.0 uv run chatwoot-mcp http
-# Each MCP client then connects to http://<host>:8214/http/api-key/mcp with the header X-Chatwoot-Token: <their key>
+# Each MCP client then connects to http://<host>:8215/http/api-key/mcp with the header X-Chatwoot-Token: <their key>
 ```
 
 Docker: `docker build -t chatwoot-mcp-server mcp/`, then run it with the same variables (the image serves `http`).
@@ -77,7 +77,7 @@ Settings are read once at start-up; a bad value stops the server with a plain me
 | `CHATWOOT_MAX_TEXT_CHARS` | `2000` | Characters of message, note or article text kept |
 | `CHATWOOT_TIMEOUT_SECONDS` / `CHATWOOT_CONNECT_TIMEOUT_SECONDS` | `30` / `10` | Chatwoot timeouts |
 | `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE` | `false` | Serve `/mcp` with `CHATWOOT_HTTP_TOKEN` in http mode |
-| `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | `127.0.0.1` / `8214` | Where http mode listens (the Docker image sets `0.0.0.0`) |
+| `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | `127.0.0.1` / `8215` | Where http mode listens (the Docker image sets `0.0.0.0`) |
 | `MCP_LOG_LEVEL` | `INFO` | Logs go to stderr; request URLs are never logged |
 
 Platform mode adds its own settings; see [docs/platform-mode.md](docs/platform-mode.md#configuration).

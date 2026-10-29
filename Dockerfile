@@ -24,12 +24,12 @@ RUN groupadd --system --gid 10001 mcp \
     && chown -R mcp:mcp /app
 USER mcp
 
-EXPOSE 8214
+EXPOSE 8215
 ENV MCP_HTTP_HOST=0.0.0.0 \
-    MCP_HTTP_PORT=8214
+    MCP_HTTP_PORT=8215
 
 ENTRYPOINT ["python", "-m", "chatwoot_mcp"]
 CMD ["http"]
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=10 \
-    CMD curl -fsS "http://127.0.0.1:${MCP_HTTP_PORT:-8214}/healthz" || exit 1
+    CMD curl -fsS "http://127.0.0.1:${MCP_HTTP_PORT:-8215}/healthz" || exit 1

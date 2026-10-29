@@ -254,10 +254,7 @@ def _log_startup(settings: Settings, platform: PlatformSettings) -> None:
         settings.browser_url,
     )
     if platform.redirect_allowlist is None:
-        logger.warning(
-            "MCP_ALLOW_ANY_REDIRECT_URI=true and no MCP_ALLOWED_CLIENT_REDIRECT_URIS: "
-            "dynamic client registration accepts any redirect_uri"
-        )
+        logger.warning("MCP_ALLOW_ANY_REDIRECT_URI=true: dynamic client registration accepts any redirect_uri")
     if settings.browser_url == settings.chatwoot_url:
         logger.warning(
             "CHATWOOT_PUBLIC_URL and CHATWOOT_URL are unset: links in tool results point at the internal URL"
