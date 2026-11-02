@@ -178,7 +178,16 @@ docker build --platform linux/amd64 .
 
 The tests use a pretend Chatwoot (`httpx.MockTransport`) and an in-memory MCP client, so no network is needed.
 `tests/test_tools.py` checks that every tool has its hints and tags and that the tables above list exactly the tools
-that exist. See [CLAUDE.md](CLAUDE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+that exist. CI runs the same checks on every pull request. Conventions are in [CLAUDE.md](CLAUDE.md).
+
+Contributing:
+
+- Open pull requests against `main`. Keep them small, with tests for new behaviour.
+- Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): subject`); no
+  AI attribution in commits or pull requests.
+- A bug report needs the version or commit, the mode (stdio, HTTP, platform), the Chatwoot version, the MCP client
+  and the smallest steps that reproduce it, with keys and personal data removed. Security issues go through
+  [SECURITY.md](SECURITY.md), not public issues.
 
 ## License
 

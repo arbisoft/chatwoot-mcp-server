@@ -24,7 +24,7 @@ from chatwoot_mcp.client.errors import (
     MissingTokenError,
     PermissionDenied,
 )
-from chatwoot_mcp.credentials.base import ChatwootCredential, Profile, ProfileMemo
+from chatwoot_mcp.credentials import ChatwootCredential, Profile, ProfileMemo
 from chatwoot_mcp.platform.identity import Identity, current_identity, identity_for
 from chatwoot_mcp.platform.mint import MintedToken, TokenMinter
 from chatwoot_mcp.tiers import Tier, TierResolver

@@ -5,8 +5,8 @@ from chatwoot_mcp.config import (
     ConfigError,
     Settings,
     module_flag,
+    parse_flag,
 )
-from chatwoot_mcp.env_flags import parse_flag
 
 BASE_ENV = {"CHATWOOT_URL": "https://chat.example.com/", "CHATWOOT_ACCOUNT_ID": "3"}
 

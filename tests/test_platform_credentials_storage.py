@@ -25,8 +25,7 @@ from chatwoot_mcp.platform.storage import (
 )
 from chatwoot_mcp.server import build_server
 from chatwoot_mcp.tiers import Tier
-from tests.conftest import ACCOUNT_ID, BASE
-from tests.platform_fakes import FakeSsoChatwoot
+from tests.conftest import ACCOUNT_ID, BASE, FakeSsoChatwoot
 
 ADA = Identity(email="ada@example.com")
 

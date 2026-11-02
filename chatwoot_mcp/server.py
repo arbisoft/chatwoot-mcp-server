@@ -26,13 +26,13 @@ from chatwoot_mcp.client import ChatwootClient
 from chatwoot_mcp.config import Settings
 from chatwoot_mcp.confirmations import ConfirmationBackend, Confirmations, MemoryConfirmationBackend
 from chatwoot_mcp.credentials import (
+    API_KEY_MOUNT_PATH,
     CredentialProvider,
     HeaderCredentialProvider,
     MountRoutedCredentialProvider,
     StaticCredentialProvider,
     api_key_mount,
 )
-from chatwoot_mcp.credentials.header import API_KEY_MOUNT_PATH
 from chatwoot_mcp.shaping import UNTRUSTED_NOTICE, Links
 from chatwoot_mcp.tiers import TierResolver, community_tier_resolver, require_tier
 from chatwoot_mcp.tools import ToolContext, register_tools

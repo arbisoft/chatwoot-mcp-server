@@ -19,8 +19,7 @@ from chatwoot_mcp.platform.mint import (
 )
 from chatwoot_mcp.platform.storage import MemoryKeyValue, fernet_for
 from chatwoot_mcp.tiers import Tier
-from tests.conftest import ACCOUNT_ID, BASE
-from tests.platform_fakes import FakeSsoChatwoot
+from tests.conftest import ACCOUNT_ID, BASE, FakeSsoChatwoot
 
 ADA = Identity(email="ada@example.com", access_token="cognito-access")
 

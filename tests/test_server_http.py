@@ -6,8 +6,7 @@ from starlette.testclient import TestClient
 from chatwoot_mcp import __main__ as cli
 from chatwoot_mcp.config import ConfigError
 from chatwoot_mcp.server import build_http_app, build_server
-from tests.conftest import FakeChatwoot
-from tests.helpers import rpc, tool_names, tool_text
+from tests.conftest import FakeChatwoot, rpc, tool_names, tool_text
 
 API_KEY_PATH = "/http/api-key/mcp"
 
@@ -94,14 +93,6 @@ def test_main_exits_with_a_plain_message_on_a_bad_setup(monkeypatch, env, argv):
     with pytest.raises(SystemExit) as raised:
         cli.main(argv)
     assert str(raised.value).startswith("chatwoot-mcp: ")
-
-
-def test_main_hands_http_to_platform_mode_when_cognito_is_set(monkeypatch):
-    handed = []
-    monkeypatch.setattr("os.environ", {"COGNITO_USER_POOL_ID": "pool"})
-    monkeypatch.setattr(cli.platform, "run", lambda: handed.append(True))
-    cli.main(["http"])
-    assert handed == [True]
 
 
 def test_request_urls_are_not_logged(monkeypatch):

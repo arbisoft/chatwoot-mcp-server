@@ -13,8 +13,6 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from chatwoot_mcp.env_flags import env_flag
-
 DEFAULT_HTTP_HOST = "127.0.0.1"
 LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 DEFAULT_HTTP_PORT = 8215
@@ -42,6 +40,24 @@ _URL = re.compile(r"https?://[^\s/]+(/\S*)?")
 
 class ConfigError(ValueError):
     """Raised when a required setting is missing or malformed."""
+
+
+# Every boolean gate is read through parse_flag, so they all agree on "true". Values are stripped: a trailing space is
+# routine in Docker .env files and must not silently turn CHATWOOT_READ_ONLY off.
+_TRUTHY = ("true", "1", "yes", "on")
+
+
+def parse_flag(raw: str | None, default: bool = False) -> bool:
+    """``True`` when the stripped, lower-cased value is true, 1, yes or on; ``default`` when unset or blank."""
+    value = (raw or "").strip().lower()
+    if not value:
+        return default
+    return value in _TRUTHY
+
+
+def env_flag(name: str, default: bool = False, environ: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    return parse_flag(env.get(name), default)
 
 
 @dataclass(frozen=True)

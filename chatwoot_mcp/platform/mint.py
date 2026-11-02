@@ -54,7 +54,7 @@ from chatwoot_mcp.client.errors import (
 )
 from chatwoot_mcp.client.http import TOKEN_HEADER, USER_AGENT, cookieless_jar, is_valid_token
 from chatwoot_mcp.client.models import Profile as ChatwootProfile
-from chatwoot_mcp.credentials.base import PROFILE_PATH, profile_from
+from chatwoot_mcp.credentials import PROFILE_PATH, profile_from
 from chatwoot_mcp.platform.identity import Identity
 from chatwoot_mcp.platform.storage import KeyValue
 from chatwoot_mcp.tiers import Tier

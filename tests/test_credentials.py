@@ -3,13 +3,17 @@ from fastmcp.server.auth import AuthContext
 
 from chatwoot_mcp.client import ChatwootClient
 from chatwoot_mcp.client.errors import InvalidTokenError, MissingTokenError
-from chatwoot_mcp.credentials import StaticCredentialProvider, token_identity
-from chatwoot_mcp.credentials.base import UNKNOWN_PROFILE, ProfileMemo, fetch_profile
-from chatwoot_mcp.credentials.header import HeaderCredentialProvider
+from chatwoot_mcp.credentials import (
+    UNKNOWN_PROFILE,
+    HeaderCredentialProvider,
+    ProfileMemo,
+    StaticCredentialProvider,
+    fetch_profile,
+    token_identity,
+)
 from chatwoot_mcp.tiers import (
     Tier,
     community_tier_resolver,
-    credential_tier_resolver,
     require_tier,
     required_tier,
     tier_allows,
@@ -102,7 +106,7 @@ async def test_the_header_provider_needs_a_header_outside_a_request():
 
 
 async def test_the_header_provider_refuses_a_key_that_cannot_be_a_header(monkeypatch):
-    monkeypatch.setattr("chatwoot_mcp.credentials.header.request_token", lambda: "bad key")
+    monkeypatch.setattr("chatwoot_mcp.credentials.request_token", lambda: "bad key")
     with pytest.raises(InvalidTokenError):
         await HeaderCredentialProvider(ChatwootClient(BASE), ACCOUNT_ID).resolve()
 
@@ -134,7 +138,8 @@ async def test_community_mode_filters_only_on_request():
     provider = StaticCredentialProvider(ChatwootClient(BASE, transport=fake), "k", ACCOUNT_ID)
     assert await community_tier_resolver(provider, filter_by_role=False)(None) is None
     assert await community_tier_resolver(provider, filter_by_role=True)(None) is Tier.AGENT
-    assert await credential_tier_resolver(StaticCredentialProvider(ChatwootClient(BASE), None, 1))(None) is None
+    no_key = StaticCredentialProvider(ChatwootClient(BASE), None, 1)
+    assert await community_tier_resolver(no_key, filter_by_role=True)(None) is None
 
 
 async def test_an_unexpected_resolver_error_shows_every_tool():
@@ -142,4 +147,4 @@ async def test_an_unexpected_resolver_error_shows_every_tool():
         async def resolve(self):
             raise RuntimeError("boom")
 
-    assert await credential_tier_resolver(Broken())(None) is None
+    assert await community_tier_resolver(Broken(), filter_by_role=True)(None) is None

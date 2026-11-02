@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Profile
-from chatwoot_mcp.credentials.base import PROFILE_PATH
+from chatwoot_mcp.credentials import PROFILE_PATH
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, ToolContext
 

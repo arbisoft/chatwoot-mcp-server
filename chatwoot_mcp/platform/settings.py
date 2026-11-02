@@ -13,8 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings, positive_int_setting, read_setting
-from chatwoot_mcp.env_flags import env_flag
+from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings, env_flag, positive_int_setting, read_setting
 
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
 REFRESH_TOKEN_FALLBACK_SECONDS = 30 * 24 * 60 * 60

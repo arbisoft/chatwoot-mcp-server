@@ -20,7 +20,7 @@ adding a tool.
 - `chatwoot_mcp/client/`: the async Chatwoot client (`http.py`), its errors and `to_tool_error` (`errors.py`), and
   tolerant pydantic views of Chatwoot objects (`models.py`). It refuses cookies, never follows redirects, raises if
   an `X-Auth-Request-*` header is about to be sent, and scrubs the key from Chatwoot's error text. Keep all four.
-- `chatwoot_mcp/credentials/`: where each request's key comes from (`CHATWOOT_HTTP_TOKEN`, or `X-Chatwoot-Token` on
+- `chatwoot_mcp/credentials.py`: where each request's key comes from (`CHATWOOT_HTTP_TOKEN`, or `X-Chatwoot-Token` on
   `/http/api-key/mcp`), and the owner's role in `CHATWOOT_ACCOUNT_ID` from `GET /api/v1/profile`.
 - `chatwoot_mcp/platform/`: Cognito OAuth plus each user's own key, fetched through Chatwoot's SSO handoff. See
   `docs/platform-mode.md`.
@@ -44,12 +44,12 @@ docker build --platform linux/amd64 .
 
 ## Isolation rule
 
-- The community core (`client/`, `credentials/`, `tools/`, `server.py`) works against any Chatwoot and imports
+- The community core (`client/`, `credentials.py`, `tools/`, `server.py`) works against any Chatwoot and imports
   nothing from `platform/`.
 - Platform-only logic (Cognito, key fetching, Valkey storage) lives in `platform/` and is reached by a one-line hook,
   only when `COGNITO_USER_POOL_ID` is set.
 - Disabled tool modules never register. Each module has one `CHATWOOT_ENABLE_*` flag, read through
-  `env_flags.env_flag`; `replies` and `macros` are off by default. `CHATWOOT_READ_ONLY` skips the whole `write/` folder
+  `config.env_flag`; `replies` and `macros` are off by default. `CHATWOOT_READ_ONLY` skips the whole `write/` folder
   (`tools/__init__.py`), so no module checks it.
 
 ## Tool conventions
@@ -101,5 +101,4 @@ docker build --platform linux/amd64 .
 
 - Conventional Commits: `type(scope): subject`, imperative, lowercase. No AI attribution anywhere: no `Co-Authored-By`
   trailer and no "Generated with" line, in commits or PRs.
-- Feature branch, then a pull request into `foss-sandbox`, then a promotion pull request from `foss-sandbox` into
-  `foss-main` (merge commit, never squash). Never push directly to either.
+- Feature branch, then a pull request into `main`. Never push directly to `main`.

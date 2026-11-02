@@ -19,8 +19,7 @@ from chatwoot_mcp.platform.cognito import _correct_expires_in, _true_expires_in
 from chatwoot_mcp.platform.http import build_platform_server
 from chatwoot_mcp.platform.settings import PlatformSettings, community_settings
 from chatwoot_mcp.platform.storage import MemoryKeyValue
-from tests.helpers import MCP_HEADERS
-from tests.platform_fakes import FakeSsoChatwoot
+from tests.conftest import MCP_HEADERS, FakeSsoChatwoot
 
 ISSUER = "https://cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_test"
 CLIENT_ID = "cognito-app-client"

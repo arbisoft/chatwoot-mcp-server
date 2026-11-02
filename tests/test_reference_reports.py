@@ -5,8 +5,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from chatwoot_mcp.tools.read.reports import day_range
-from tests.conftest import REPORTS, FakeChatwoot, profile
-from tests.helpers import data
+from tests.conftest import REPORTS, FakeChatwoot, data, profile
 
 
 async def test_get_me_returns_an_allow_list_and_never_a_token(settings, fake):

@@ -37,7 +37,9 @@ def configure_logging() -> None:
 def main(argv: Sequence[str] | None = None) -> None:
     transport = parse_args(argv).transport
     if transport == "http" and platform.enabled():
-        platform.run()
+        from chatwoot_mcp.platform.http import run  # needs the [platform] extra, so only imported here
+
+        run()
         return
     configure_logging()
     try:

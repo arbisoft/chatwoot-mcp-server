@@ -1,11 +1,10 @@
-"""The credential every tool call runs with, and how a mode supplies it.
+"""Where each tool call's Chatwoot key comes from, and the key owner's role.
 
-A :class:`CredentialProvider` answers "which Chatwoot key, and whose, does this request use?". Community mode has
-two (``static``, ``header``); platform mode adds one that fetches each signed-in user's own key. Tools only ever
-see the protocol.
-
-The identity of a key-based credential is ``sha256(key)[:16]``: stable enough to key a memo and a confirmation on,
-and never the raw key.
+- :class:`StaticCredentialProvider`: one key from ``CHATWOOT_HTTP_TOKEN`` (stdio, or ``/mcp`` with
+  ``CHATWOOT_HTTP_SHARED_TOKEN_ROUTE=true``). Its tier is read once and kept for the process.
+- :class:`HeaderCredentialProvider`: each caller's own ``X-Chatwoot-Token`` on ``/http/api-key/mcp``. The mount
+  strips ``X-Auth-Request-*`` headers on arrival, so a caller can never smuggle an SSO identity to Chatwoot.
+- Platform mode has its own provider in ``platform/credentials.py``.
 """
 
 from __future__ import annotations
@@ -18,7 +17,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from fastmcp.server.dependencies import get_http_request
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 from chatwoot_mcp.client import ChatwootClient, ChatwootError
+from chatwoot_mcp.client.errors import InvalidTokenError, MissingTokenError
+from chatwoot_mcp.client.http import is_identity_header, is_valid_token
 from chatwoot_mcp.client.models import Profile as ChatwootProfile
 from chatwoot_mcp.tiers import Tier, tier_for
 
@@ -144,3 +148,99 @@ async def _load_or_unknown(load: ProfileLoader) -> Profile:
         return await load()
     except ChatwootError:
         return UNKNOWN_PROFILE
+
+
+class StaticCredentialProvider:
+    def __init__(
+        self, client: ChatwootClient, token: str | None, account_id: int, *, memo: ProfileMemo | None = None
+    ) -> None:
+        self._client = client
+        self._token = token
+        self._account_id = account_id
+        self._memo = memo if memo is not None else ProfileMemo(ttl_seconds=None)
+
+    async def resolve(self) -> ChatwootCredential:
+        if not self._token:
+            raise MissingTokenError("no Chatwoot key is configured for this request (set CHATWOOT_HTTP_TOKEN)")
+        token = self._token
+        profile = await self._memo.get(
+            token_identity(token), lambda: fetch_profile(self._client, token, self._account_id)
+        )
+        return ChatwootCredential.for_token(token, profile)
+
+    async def warm(self) -> None:
+        if self._token:
+            await self.resolve()
+
+
+API_KEY_MOUNT_PATH = "/http/api-key"
+TOKEN_HEADER = "x-chatwoot-token"
+HEADER_PROFILE_TTL_SECONDS = 60.0
+_SCOPE_MARKER = "chatwoot_mcp.api_key_mount"
+
+
+def _without_identity_headers(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    return [(name, value) for name, value in headers if not is_identity_header(name.decode("latin-1"))]
+
+
+def api_key_mount(app: ASGIApp) -> ASGIApp:
+    """Wrap the MCP app for the ``/http/api-key`` mount."""
+
+    async def wrapped(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            scope = {**scope, "headers": _without_identity_headers(list(scope.get("headers", []))), _SCOPE_MARKER: True}
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+def _current_scope() -> Scope | None:
+    try:
+        return get_http_request().scope
+    except RuntimeError:
+        return None
+
+
+def on_api_key_mount() -> bool:
+    scope = _current_scope()
+    return bool(scope and scope.get(_SCOPE_MARKER))
+
+
+def request_token() -> str | None:
+    scope = _current_scope()
+    if scope is None:
+        return None
+    for name, value in scope.get("headers", []):
+        if name.lower() == TOKEN_HEADER.encode():
+            return value.decode("latin-1").strip() or None
+    return None
+
+
+class HeaderCredentialProvider:
+    def __init__(self, client: ChatwootClient, account_id: int, *, memo: ProfileMemo | None = None) -> None:
+        self._client = client
+        self._account_id = account_id
+        self._memo = memo if memo is not None else ProfileMemo(ttl_seconds=HEADER_PROFILE_TTL_SECONDS)
+
+    async def resolve(self) -> ChatwootCredential:
+        token = request_token()
+        if not token:
+            raise MissingTokenError("send your own Chatwoot key in the X-Chatwoot-Token header")
+        if not is_valid_token(token):
+            raise InvalidTokenError("the X-Chatwoot-Token header must be printable ASCII without spaces")
+        profile = await self._memo.get(
+            token_identity(token), lambda: fetch_profile(self._client, token, self._account_id)
+        )
+        return ChatwootCredential.for_token(token, profile)
+
+
+class MountRoutedCredentialProvider:
+    """Header credentials on ``/http/api-key``, the default provider everywhere else."""
+
+    def __init__(self, default: CredentialProvider, api_key: CredentialProvider) -> None:
+        self._default = default
+        self._api_key = api_key
+
+    async def resolve(self) -> ChatwootCredential:
+        provider = self._api_key if on_api_key_mount() else self._default
+        return await provider.resolve()

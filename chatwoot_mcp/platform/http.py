@@ -40,8 +40,7 @@ from starlette.routing import Mount, Route
 from chatwoot_mcp.client import ChatwootClient
 from chatwoot_mcp.config import ConfigError, Settings
 from chatwoot_mcp.confirmations import ConfirmationBackend
-from chatwoot_mcp.credentials import api_key_mount
-from chatwoot_mcp.credentials.header import API_KEY_MOUNT_PATH
+from chatwoot_mcp.credentials import API_KEY_MOUNT_PATH, api_key_mount
 from chatwoot_mcp.platform.cognito import ChatwootCognitoProvider
 from chatwoot_mcp.platform.credentials import MintedCredentialProvider, platform_tier_resolver
 from chatwoot_mcp.platform.mint import CACHE_SALT, TokenCache, TokenEndpoint, TokenMinter

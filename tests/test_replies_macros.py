@@ -4,8 +4,7 @@ from fastmcp import Client
 from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError
 from chatwoot_mcp.server import build_server
 from chatwoot_mcp.tools.write.replies import send_failure
-from tests.conftest import FakeChatwoot
-from tests.helpers import unframed
+from tests.conftest import FakeChatwoot, unframed
 
 CHAT = {"id": 12, "can_reply": True, "meta": {"channel": "Channel::Email", "sender": {"id": 4, "name": "Sam"}}}
 REPLY = {"conversation_id": 12, "content": "Hi Sam"}

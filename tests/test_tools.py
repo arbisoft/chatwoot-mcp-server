@@ -6,7 +6,7 @@ from fastmcp import Client
 
 from chatwoot_mcp.config import TOOL_MODULES
 from chatwoot_mcp.server import INSTRUCTIONS, build_server
-from tests.helpers import tools
+from tests.conftest import tools
 
 ANNOTATION_HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 README = Path(__file__).resolve().parents[1] / "README.md"

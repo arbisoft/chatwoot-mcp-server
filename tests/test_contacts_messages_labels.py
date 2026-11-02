@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from tests.helpers import data, unframed
+from tests.conftest import data, unframed
 
 CONTACT = {"id": 4, "name": "Sam", "email": "sam@example.com", "custom_attributes": {"plan": "pro"}}
 

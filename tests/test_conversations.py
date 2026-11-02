@@ -3,7 +3,7 @@ import json
 import pytest
 
 from chatwoot_mcp.tools.write.conversations import snooze_seconds
-from tests.helpers import data, unframed
+from tests.conftest import data, unframed
 
 CHAT = {
     "id": 12,

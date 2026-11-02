@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 from chatwoot_mcp import __main__ as cli
 from chatwoot_mcp import platform
 from chatwoot_mcp.config import ConfigError
-from chatwoot_mcp.credentials.header import API_KEY_MOUNT_PATH
+from chatwoot_mcp.credentials import API_KEY_MOUNT_PATH
 from chatwoot_mcp.platform import http as platform_http
 from chatwoot_mcp.platform.settings import (
     DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
@@ -23,8 +23,7 @@ from chatwoot_mcp.platform.settings import (
     PlatformSettings,
     community_settings,
 )
-from tests.conftest import FakeChatwoot
-from tests.helpers import MCP_HEADERS, rpc, tool_names
+from tests.conftest import MCP_HEADERS, FakeChatwoot, rpc, tool_names
 
 ISSUER = "https://cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_test"
 DISCOVERY = OIDCConfiguration(

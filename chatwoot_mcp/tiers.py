@@ -31,7 +31,7 @@ from chatwoot_mcp.client.errors import ChatwootError
 if TYPE_CHECKING:
     from fastmcp.server.auth import AccessToken
 
-    from chatwoot_mcp.credentials.base import CredentialProvider
+    from chatwoot_mcp.credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +100,12 @@ def require_tier(resolver: TierResolver) -> AuthCheck:
     return check
 
 
-async def no_filtering(_token: AccessToken | None) -> Tier | None:
-    return None
+def community_tier_resolver(credentials: CredentialProvider, *, filter_by_role: bool) -> TierResolver:
+    """Community mode shows every tool (``None``) unless ``CHATWOOT_FILTER_TOOLS_BY_ROLE`` is on."""
 
-
-def credential_tier_resolver(credentials: CredentialProvider) -> TierResolver:
     async def resolve(_token: AccessToken | None) -> Tier | None:
+        if not filter_by_role:
+            return None
         try:
             return (await credentials.resolve()).tier
         except ChatwootError:
@@ -115,8 +115,3 @@ def credential_tier_resolver(credentials: CredentialProvider) -> TierResolver:
             return None
 
     return resolve
-
-
-def community_tier_resolver(credentials: CredentialProvider, *, filter_by_role: bool) -> TierResolver:
-    """Community mode shows every tool unless ``CHATWOOT_FILTER_TOOLS_BY_ROLE`` is on."""
-    return credential_tier_resolver(credentials) if filter_by_role else no_filtering

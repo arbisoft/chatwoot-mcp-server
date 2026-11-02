@@ -16,7 +16,7 @@ from chatwoot_mcp.shaping import (
     truncate,
     untrusted_field,
 )
-from tests.helpers import unframed
+from tests.conftest import unframed
 
 LINKS = Links("https://chat.test", 5)
 
