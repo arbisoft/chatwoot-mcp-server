@@ -15,7 +15,7 @@ Security issues go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Development setup
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). Work in the `mcp/` folder.
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --all-extras
@@ -24,7 +24,7 @@ uv run ruff check .
 uv run pytest --cov=chatwoot_mcp --cov-fail-under=80
 ```
 
-CI runs the same checks on every pull request that touches `mcp/`. Tests must not need a live Chatwoot: use the
+CI runs the same checks on every push and pull request. Tests must not need a live Chatwoot: use the
 `FakeChatwoot` transport in `tests/conftest.py`.
 
 ## Branches

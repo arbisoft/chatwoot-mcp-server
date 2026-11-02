@@ -1,12 +1,14 @@
 # Chatwoot and its MCP server on the devkit
 
-Runs this Chatwoot fork and its MCP server behind [Pressingly/mpass-sso-devkit](https://github.com/Pressingly/mpass-sso-devkit),
-the local copy of the platform's mPass SSO edge. Clone the devkit next to this repository, so it can build from
-`../chatwoot`, and copy `docker-compose.chatwoot.yml` and `setup-chatwoot.sh` into it:
+Runs the Chatwoot fork and this MCP server behind [Pressingly/mpass-sso-devkit](https://github.com/Pressingly/mpass-sso-devkit),
+the local copy of the platform's mPass SSO edge. Clone the devkit and the Chatwoot fork next to this repository, so
+the devkit can build both from `../chatwoot` and `../chatwoot-mcp`, and copy `docker-compose.chatwoot.yml` and
+`setup-chatwoot.sh` into the devkit:
 
 ```bash
 git clone https://github.com/Pressingly/mpass-sso-devkit.git ../mpass-sso-devkit
-cp mcp/devkit/docker-compose.chatwoot.yml mcp/devkit/setup-chatwoot.sh ../mpass-sso-devkit/
+git clone -b refactor/mcp-zammad-structure https://github.com/habib049/chatwoot.git ../chatwoot
+cp devkit/docker-compose.chatwoot.yml devkit/setup-chatwoot.sh ../mpass-sso-devkit/
 ```
 
 The QR login is the Moneta **sandbox**: scan it with the sandbox mPass app, activated with a sandbox activation (a

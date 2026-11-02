@@ -2,7 +2,8 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.chatwoot.yml up -d --build
 #
-# Both build from the Chatwoot checkout next to this folder (../chatwoot). Run ./setup-chatwoot.sh once first.
+# They build from the checkouts next to this folder: ../chatwoot (the fork) and ../chatwoot-mcp. Run ./setup-chatwoot.sh
+# once first.
 #
 #   https://chatwoot.foss.local.dev   Chatwoot behind the mPass login (strip headers, then mpass-auth)
 #   https://chat-mcp.foss.local.dev   the MCP server; no mpass-auth, FastMCP runs its own Cognito login
@@ -102,7 +103,7 @@ services:
 
   chatwoot-mcp:
     build:
-      context: ../chatwoot/mcp
+      context: ../chatwoot-mcp
     image: mpass-sso-devkit/chatwoot-mcp:dev
     restart: unless-stopped
     depends_on:

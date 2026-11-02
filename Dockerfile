@@ -1,4 +1,4 @@
-# Build context is this folder (mcp/): docker build -t chatwoot-mcp-server mcp/
+# Build context is the repository root: docker build -t chatwoot-mcp .
 FROM python:3.12-slim
 
 WORKDIR /app

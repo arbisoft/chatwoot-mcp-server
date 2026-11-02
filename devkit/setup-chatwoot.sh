@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 [ -f .env ] || { echo "Run ./setup.sh first: there is no .env yet." >&2; exit 1; }
 [ -d ../chatwoot ] || { echo "Expected the Chatwoot checkout at ../chatwoot." >&2; exit 1; }
+[ -d ../chatwoot-mcp ] || { echo "Expected the chatwoot-mcp checkout at ../chatwoot-mcp." >&2; exit 1; }
 
 add() {
   grep -q "^$1=" .env || { echo "$1=$(openssl rand -hex "$2")" >> .env; echo "added $1 to .env"; }

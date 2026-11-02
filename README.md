@@ -5,8 +5,8 @@ conversations. It lets Claude, or any MCP client, read and work on chats, custom
 own Chatwoot permissions**: every request carries the caller's own Chatwoot key, never a shared admin key, so
 Chatwoot itself decides what each user can see and change.
 
-It lives in `mcp/` inside the Chatwoot fork but is its own Python project and never imports from the Rails app.
-Every tool calls an API route Chatwoot already has; nothing in Chatwoot is changed.
+It talks to Chatwoot only through its API. Every tool calls an API route Chatwoot already has; nothing in Chatwoot is
+changed. Platform mode uses the mPass SSO login of the Moneta Chatwoot fork ([habib049/chatwoot](https://github.com/habib049/chatwoot)).
 
 Status: 49 tools in stdio and HTTP. Replies and macros are available behind opt-in flags. Platform mode (Moneta SSO,
 each user's own key fetched automatically) is available.
@@ -57,7 +57,7 @@ CHATWOOT_URL=http://chatwoot-web:3000 CHATWOOT_ACCOUNT_ID=1 MCP_HTTP_HOST=0.0.0.
 # Each MCP client then connects to http://<host>:8215/http/api-key/mcp with the header X-Chatwoot-Token: <their key>
 ```
 
-Docker: `docker build -t chatwoot-mcp-server mcp/`, then run it with the same variables (the image serves `http`).
+Docker: `docker build -t chatwoot-mcp .`, then run it with the same variables (the image serves `http`).
 
 ## Configuration
 

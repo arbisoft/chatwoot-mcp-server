@@ -1,16 +1,16 @@
-# CLAUDE.md: mcp/ (chatwoot-mcp-server)
+# CLAUDE.md: chatwoot-mcp
 
-Guidance for Claude Code when working in this folder. The layout and conventions follow
+Guidance for Claude Code when working in this repository. The layout and conventions follow
 `Pressingly/zammad-mcp-server` (branch `foss-sandbox`); keep them aligned.
 
 ## Project
 
 `chatwoot-mcp-server`: an MIT-licensed MCP server for Chatwoot, built on FastMCP. Every Chatwoot call carries the
-caller's own key in `api_access_token`, never a shared admin key. It lives in `mcp/` inside the Chatwoot fork but is
-its own Python project: it must never import from the Rails app.
+caller's own key in `api_access_token`, never a shared admin key. It talks to Chatwoot only through its API.
 
 **No changes to Chatwoot are allowed.** Every tool calls an API route that already exists. Check a route in
-`swagger/swagger.json`, `config/routes.rb` and `app/views/api/` (repository root) before adding a tool.
+`swagger/swagger.json`, `config/routes.rb` and `app/views/api/` of the Chatwoot fork (habib049/chatwoot) before
+adding a tool.
 
 - `chatwoot_mcp/__main__.py`: `chatwoot-mcp stdio|http`; `http` hands over to `platform/` when
   `COGNITO_USER_POOL_ID` is set.
