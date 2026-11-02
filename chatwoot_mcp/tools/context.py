@@ -26,6 +26,7 @@ from chatwoot_mcp.tiers import Tier, tier_allows
 ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
 ContactId = Annotated[int, Field(ge=1, description="The customer's id in Chatwoot. Use search_contacts to find it.")]
 Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
+ConfirmationToken = Annotated[str, Field(min_length=1, max_length=200, description="From the prepare tool.")]
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,6 @@ class ChatwootSession:
     async def put(self, path: str, body: Mapping[str, Any]) -> Any:
         """PUT is retried on timeouts, so it must only ever set fields, never send a message."""
         return await self.client.request("PUT", self._path(path, 1), token=self.credential.token, json=dict(body))
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def as_dict(value: Any) -> dict[str, Any]:

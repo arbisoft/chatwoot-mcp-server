@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from chatwoot_mcp.config import ConfigError, Settings, positive_int_setting, read_setting
+from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings, positive_int_setting, read_setting
 from chatwoot_mcp.env_flags import env_flag
 
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
@@ -47,7 +47,6 @@ REQUIRED = (
 )
 HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
 NAMESPACE_LENGTH = 12
-LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
 def _split(raw: str, *, on_spaces: bool = False) -> tuple[str, ...]:

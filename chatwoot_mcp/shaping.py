@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
@@ -117,13 +118,18 @@ def shape_person(person: Person | None, *, source: str) -> dict[str, Any] | None
 
 
 def shape_attributes(values: dict[str, Any], *, source: str, item_id: int) -> dict[str, Any]:
-    """Custom attributes: the website widget lets visitors set them, so text values are untrusted."""
-    return {
-        key: untrusted_field(value[:ATTRIBUTE_VALUE_CHARS], source=source, item_id=item_id)
-        if isinstance(value, str)
-        else value
-        for key, value in values.items()
-    }
+    """Custom attributes: the website widget lets visitors set them, so text, lists and objects are untrusted.
+
+    Chatwoot stores them as JSON, so only numbers, booleans and null pass through as they are.
+    """
+
+    def shaped(value: Any) -> Any:
+        if value is None or isinstance(value, bool | int | float):
+            return value
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        return untrusted_field(text[:ATTRIBUTE_VALUE_CHARS], source=source, item_id=item_id)
+
+    return {key: shaped(value) for key, value in values.items()}
 
 
 def message_type(raw: int | str | None) -> str:

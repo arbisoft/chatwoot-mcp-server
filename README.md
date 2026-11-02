@@ -43,7 +43,7 @@ Claude Code (`.mcp.json`) or Claude Desktop:
   "mcpServers": {
     "chatwoot": {
       "command": "uv",
-      "args": ["--directory", "/path/to/chatwoot/mcp", "run", "chatwoot-mcp", "stdio"],
+      "args": ["--directory", "/path/to/chatwoot-mcp", "run", "chatwoot-mcp", "stdio"],
       "env": { "CHATWOOT_URL": "https://chat.example.com", "CHATWOOT_ACCOUNT_ID": "1", "CHATWOOT_HTTP_TOKEN": "..." }
     }
   }
@@ -71,9 +71,9 @@ Settings are read once at start-up; a bad value stops the server with a plain me
 | `CHATWOOT_PUBLIC_URL` | `CHATWOOT_URL` | Base URL for the `url` links in results |
 | `CHATWOOT_READ_ONLY` | `false` | `true` registers no tool that changes anything |
 | `CHATWOOT_ENABLE_<MODULE>` | on, except `REPLIES` and `MACROS` | Turn a tool module on or off (see the `module` column below) |
-| `CHATWOOT_FILTER_TOOLS_BY_ROLE` | `false` | Hide tools the key's role cannot use (reports for agents). Platform mode always filters |
+| `CHATWOOT_FILTER_TOOLS_BY_ROLE` | `false` | HTTP only: hide tools the key's role cannot use (reports for agents). Over stdio every tool is listed and refuses when called. Platform mode always filters |
 | `CHATWOOT_CONFIRM_TTL_SECONDS` | `600` | How long a confirmation token from a `prepare_*` tool stays valid |
-| `CHATWOOT_MAX_ITEMS` | `25` | Most items a list returns |
+| `CHATWOOT_MAX_ITEMS` | `25` | Most items a list returns. Keep it at 25 or more: Chatwoot sends chats 25 and customers 15 per page, and the rest of a page past this limit cannot be reached |
 | `CHATWOOT_MAX_TEXT_CHARS` | `2000` | Characters of message, note or article text kept |
 | `CHATWOOT_TIMEOUT_SECONDS` / `CHATWOOT_CONNECT_TIMEOUT_SECONDS` | `30` / `10` | Chatwoot timeouts |
 | `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE` | `false` | Serve `/mcp` with `CHATWOOT_HTTP_TOKEN` in http mode |

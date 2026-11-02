@@ -136,8 +136,16 @@ async def test_a_macro_preview_lists_every_step_and_warns_about_ones_that_reach_
     assert done["status"] == "started" and "background" in done["note"]
 
 
-async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything, fake):
+async def test_a_macro_that_resolves_warns_about_the_satisfaction_survey(everything, fake):
     macro_routes(fake, [{"action_name": "resolve_conversation", "action_params": None}])
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
+    )
+    assert "satisfaction survey" in preview["preview"]["warning"]
+
+
+async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything, fake):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["refund"]}])
     preview, _, _ = await two_steps(
         everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
     )
@@ -145,7 +153,9 @@ async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything
     async with Client(build_server(everything, transport=fake)) as client:
         listed = (await client.call_tool("list_macros", {})).data
     assert listed == {
-        "macros": [{"id": 7, "name": "Refund", "visibility": "global", "steps": [{"step": "resolve_conversation"}]}]
+        "macros": [
+            {"id": 7, "name": "Refund", "visibility": "global", "steps": [{"step": "add_label", "with": ["refund"]}]}
+        ]
     }
 
 

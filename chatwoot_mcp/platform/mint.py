@@ -23,7 +23,9 @@ time. A role-gated refusal only sets a "due" flag behind a ``SET NX EX`` limiter
 identity). A 401 (the user reset their key) drops the entry and fetches again. Every fetch, re-check and denial
 writes one ``chatwoot_mcp.audit`` line, without the key or the email.
 
-Synthetic identities are refused before any request, because the first request would create that user in Chatwoot.
+With ``LAUNCHPAD_EMAIL_CAPTURE`` on, synthetic identities are refused before any request, because the first request
+would create a duplicate of the user the launchpad later relinks. With it off they are let in: that address is the
+account the web login uses too.
 Every other failure fails closed: there is no fallback to another key.
 """
 
@@ -358,10 +360,6 @@ class TokenMinter:
         self._require_verified_email = require_verified_email
         self._clock = clock
         self._locks = KeyedLocks()
-
-    @property
-    def lock_count(self) -> int:
-        return len(self._locks)
 
     def _refuse_synthetic(self, identity: Identity) -> None:
         # With email capture off every user has the synthetic address, and it is the same account the web login

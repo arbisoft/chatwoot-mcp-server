@@ -102,10 +102,6 @@ class ProfileMemo:
         self._entries: OrderedDict[str, tuple[Profile, float]] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
 
-    @property
-    def size(self) -> int:
-        return len(self._entries)
-
     def _fresh(self, identity: str) -> Profile | None:
         entry = self._entries.get(identity)
         if entry is None or entry[1] <= self._clock():

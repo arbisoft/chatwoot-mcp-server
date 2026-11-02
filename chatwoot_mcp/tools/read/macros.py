@@ -12,13 +12,9 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Macro
 from chatwoot_mcp.shaping import shape_macro
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import (
-    READ,
-    ToolContext,
-)
+from chatwoot_mcp.tools.context import READ, ToolContext, limited
 
 MODULE = "macros"
-# Macro steps that reach the customer or leave Chatwoot.
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
@@ -30,4 +26,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             macros = Macro.parse_rows(await session.get("/macros"))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {"macros": [shape_macro(macro) for macro in macros[: context.max_items]]}
+        items, cut = limited(macros, context.max_items)
+        out: dict[str, Any] = {"macros": [shape_macro(macro) for macro in items]}
+        if cut:
+            out["truncated"] = f"Only the first {context.max_items} macros are shown."
+        return out

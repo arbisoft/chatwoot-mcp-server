@@ -92,7 +92,7 @@ def test_the_memo_evicts_the_oldest():
     memo = ProfileMemo(ttl_seconds=None, max_entries=1)
     memo._store("a", UNKNOWN_PROFILE)
     memo._store("b", UNKNOWN_PROFILE)
-    assert memo.size == 1 and memo._fresh("b") is not None
+    assert len(memo._entries) == 1 and memo._fresh("b") is not None
 
 
 async def test_the_header_provider_needs_a_header_outside_a_request():

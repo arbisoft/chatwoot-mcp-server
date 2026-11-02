@@ -423,3 +423,13 @@ def test_the_namespace_separates_deployments_sharing_one_valkey():
     assert len(first.namespace) == 12
     assert len({first.namespace, second.namespace, third.namespace}) == 3
     assert first.namespace == PlatformSettings.from_env(ENV).namespace
+
+
+def test_a_bad_log_level_falls_back_to_info_in_community_mode(monkeypatch):
+    import logging
+
+    monkeypatch.setenv("MCP_LOG_LEVEL", "loud")
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
+    seen: dict = {}
+    cli.configure_logging()
+    assert seen["level"] == "INFO"

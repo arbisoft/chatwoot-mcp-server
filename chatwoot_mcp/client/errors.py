@@ -14,6 +14,7 @@ import httpx
 INVALID_KEY_DETAIL = "Invalid Access Token"
 NOT_AUTHORIZED_DETAIL = "You are not authorized to do this action"
 DETAIL_LIMIT = 300
+REDACTED = "[key hidden]"
 
 
 class ChatwootError(Exception):
@@ -110,7 +111,8 @@ def error_for_status(status_code: int, detail: str) -> ChatwootAPIError:
     return _ERRORS_BY_STATUS.get(status_code, ChatwootAPIError)(status_code, detail)
 
 
-def error_detail(response: httpx.Response) -> str:
+def error_detail(response: httpx.Response, *, secret: str | None = None) -> str:
+    """Chatwoot's reason, with ``secret`` hidden before the text is cut, so no part of the key can survive."""
     fallback = response.reason_phrase or "unexpected response"
     try:
         body = response.json()
@@ -118,7 +120,10 @@ def error_detail(response: httpx.Response) -> str:
         return fallback
     if not isinstance(body, dict):
         return fallback
-    return (_error_message(body) or fallback)[:DETAIL_LIMIT]
+    text = _error_message(body) or fallback
+    if secret:
+        text = text.replace(secret, REDACTED)
+    return text[:DETAIL_LIMIT]
 
 
 def _error_message(body: dict) -> str | None:

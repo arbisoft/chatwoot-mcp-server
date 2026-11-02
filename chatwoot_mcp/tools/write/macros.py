@@ -22,6 +22,7 @@ from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
     PREPARE,
+    ConfirmationToken,
     ConversationId,
     ToolContext,
     confirmation_refusal,
@@ -37,6 +38,7 @@ OUTWARD_STEPS = {
     "send_attachment": "sends a file to the customer",
     "send_email_transcript": "emails the chat transcript",
     "send_webhook_event": "sends the chat's data to an outside web address",
+    "resolve_conversation": "resolves the chat, which may send the customer a satisfaction survey",
 }
 
 MacroId = Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")]
@@ -80,7 +82,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("Run macro", IRREVERSIBLE, module=MODULE, tier=Tier.AGENT))
     async def run_macro(
-        confirmation_token: Annotated[str, Field(min_length=1, max_length=200, description="From prepare_run_macro.")],
+        confirmation_token: ConfirmationToken,
         macro_id: MacroId,
         conversation_id: ConversationId,
     ) -> dict[str, Any] | str:

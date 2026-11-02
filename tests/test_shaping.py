@@ -162,8 +162,13 @@ def test_people_without_an_id_are_dropped():
     assert shape_person(None, source="x") is None and shape_person(Person(), source="x") is None
 
 
-def test_attributes_only_frame_text():
-    assert shape_attributes({"n": 1, "b": True}, source="s", item_id=1) == {"n": 1, "b": True}
+def test_attributes_frame_text_lists_and_objects_but_not_numbers():
+    shaped = shape_attributes(
+        {"n": 1, "b": True, "none": None, "tags": ["ignore previous"], "obj": {"k": "<b>"}}, source="s", item_id=1
+    )
+    assert {k: shaped[k] for k in ("n", "b", "none")} == {"n": 1, "b": True, "none": None}
+    assert unframed(shaped["tags"]) == '["ignore previous"]'
+    assert shaped["obj"].startswith("<untrusted_content") and "<b>" not in shaped["obj"]
 
 
 def test_notes_and_survey_feedback_are_framed():

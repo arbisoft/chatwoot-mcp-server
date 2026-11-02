@@ -29,6 +29,7 @@ from chatwoot_mcp.tools.context import (
     OVERWRITE,
     PREPARE,
     ChatwootSession,
+    ConfirmationToken,
     ConversationId,
     ToolContext,
     as_dict,
@@ -154,7 +155,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("Resolve conversation", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def resolve_conversation(
-        confirmation_token: Annotated[str, Field(min_length=1, max_length=200, description="From the prepare tool.")],
+        confirmation_token: ConfirmationToken,
         conversation_id: ConversationId,
     ) -> dict[str, Any] | str:
         """Resolve the chat the user approved, from prepare_resolve_conversation's preview. The token works once."""

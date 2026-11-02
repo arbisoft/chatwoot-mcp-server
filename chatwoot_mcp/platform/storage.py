@@ -175,9 +175,6 @@ class ValkeyConfirmationBackend:
     decrypt, after a key rotation say, reads as absent and the caller prepares the action again.
     """
 
-    # ponytail: no global byte cap like Zammad's Lua ledger; records are a few hundred bytes and expire with the
-    # confirmation TTL. Add the ledger if a confirmation ever carries a message body.
-
     def __init__(self, client: Redis, fernet: Fernet, *, namespace: str) -> None:
         self._store = RedisKeyValue(client)
         self._fernet = fernet

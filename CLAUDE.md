@@ -1,7 +1,8 @@
 # CLAUDE.md: chatwoot-mcp
 
 Guidance for Claude Code when working in this repository. The layout and conventions follow
-`Pressingly/zammad-mcp-server` (branch `foss-sandbox`); keep them aligned.
+`Pressingly/zammad-mcp-server` (branch `foss-sandbox`); keep them aligned. One intentional difference: tools are
+split into `tools/read/` and `tools/write/` instead of one module per area.
 
 ## Project
 

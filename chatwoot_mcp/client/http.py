@@ -47,7 +47,6 @@ from chatwoot_mcp.client.errors import (
 IDENTITY_HEADER_PREFIX = "x-auth-request-"
 TOKEN_HEADER = "api_access_token"
 USER_AGENT = "chatwoot-mcp-server"
-REDACTED = "[key hidden]"
 RETRY_SAFE_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE"})
 RETRYABLE_STATUSES = frozenset({502, 503, 504})
 PRE_SEND_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
@@ -152,13 +151,6 @@ def _retryable_transport_error(error: httpx.TransportError, retry_safe: bool) ->
     if isinstance(error, PRE_SEND_ERRORS):
         return True
     return retry_safe and isinstance(error, IN_FLIGHT_ERRORS)
-
-
-def _scrubbed(error: ChatwootAPIError, token: str) -> ChatwootAPIError:
-    """Chatwoot's own error text is shown to the user, so make sure it can never carry the key."""
-    if token not in error.detail:
-        return error
-    return type(error)(error.status_code, error.detail.replace(token, REDACTED))
 
 
 class ChatwootClient:
@@ -270,5 +262,5 @@ class ChatwootClient:
                 attempt += 1
                 continue
             if not response.is_success:
-                raise _scrubbed(error_for_status(response.status_code, error_detail(response)), token)
+                raise error_for_status(response.status_code, error_detail(response, secret=token))
             return response

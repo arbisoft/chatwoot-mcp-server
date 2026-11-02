@@ -23,6 +23,7 @@ from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
     PREPARE,
+    ConfirmationToken,
     ContactId,
     ConversationId,
     ToolContext,
@@ -43,7 +44,6 @@ FirstMessage = Annotated[
     str | None,
     Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="An optional first message to the customer."),
 ]
-ConfirmationToken = Annotated[str, Field(min_length=1, max_length=200, description="From the prepare tool.")]
 
 
 def send_failure(error: ChatwootError, what: str) -> str:

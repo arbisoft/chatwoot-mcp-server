@@ -82,6 +82,15 @@ async def test_chatwoots_error_text_never_carries_the_key():
     assert "[key hidden]" in raised.value.detail
 
 
+async def test_the_key_is_hidden_before_the_error_text_is_cut():
+    # The key straddles the 300-character cut: cutting first would leave its start in the message.
+    message = "x" * (300 - len(KEY) // 2) + KEY
+    client, _ = client_for(lambda r: httpx.Response(422, json={"message": message}))
+    with pytest.raises(UnprocessableError) as raised:
+        await client.request("POST", "/x", token=KEY, json={})
+    assert KEY[: len(KEY) // 2] not in raised.value.detail
+
+
 @pytest.mark.parametrize("token", [None, ""])
 async def test_no_key_means_no_request(token):
     client, transport = client_for(lambda r: httpx.Response(200))
