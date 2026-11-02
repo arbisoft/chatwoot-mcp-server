@@ -30,6 +30,7 @@ import jwt
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.providers.aws import AWSCognitoProvider
+from joserfc.errors import JoseError
 
 logger = logging.getLogger(__name__)
 
@@ -145,20 +146,23 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
         return validated.model_copy(update={"claims": claims})
 
     async def _resolve_upstream_claims(self, token: str) -> dict[str, Any] | None:
-        """Follow the issued JWT's jti to the stored Cognito token response; ``None`` on any miss."""
+        """Follow the issued JWT's jti to the stored Cognito token response; ``None`` on any miss.
+
+        A store failure raises instead, so a Valkey outage is a server error, not a 401 that forces a new login.
+        """
         try:
             jti = _field(self.jwt_issuer.verify_token(token), "jti")
-            if not jti:
-                return None
-            mapping = await self._jti_mapping_store.get(key=jti)
-            upstream_id = _field(mapping, "upstream_token_id") if mapping else None
-            if not upstream_id:
-                return None
-            token_set = await self._upstream_token_store.get(key=upstream_id)
-            raw = _field(token_set, "raw_token_data") if token_set else None
-            if not isinstance(raw, dict):
-                return None
-            return await self._extract_upstream_claims(raw, include_access_token=True)
-        except Exception as exc:
-            logger.warning("could not resolve the upstream id_token: %s", exc)
+        except (JoseError, ValueError) as exc:
+            logger.warning("could not verify the issued token: %s", exc)
             return None
+        if not jti:
+            return None
+        mapping = await self._jti_mapping_store.get(key=jti)
+        upstream_id = _field(mapping, "upstream_token_id") if mapping else None
+        if not upstream_id:
+            return None
+        token_set = await self._upstream_token_store.get(key=upstream_id)
+        raw = _field(token_set, "raw_token_data") if token_set else None
+        if not isinstance(raw, dict):
+            return None
+        return await self._extract_upstream_claims(raw, include_access_token=True)

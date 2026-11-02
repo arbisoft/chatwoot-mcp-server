@@ -105,6 +105,18 @@ async def test_resolve_swallows_verification_errors(provider):
     assert await provider._resolve_upstream_claims("issued") is None
 
 
+async def test_a_store_outage_is_raised_not_reported_as_a_missing_session(provider):
+    class DownStore:
+        async def get(self, key):
+            raise ConnectionError("valkey is down")
+
+    wire(provider)
+    provider._jti_mapping_store = DownStore()
+
+    with pytest.raises(ConnectionError):
+        await provider._resolve_upstream_claims("issued")
+
+
 @pytest.fixture
 def validated(monkeypatch):
     token = AccessToken(token="t", client_id="c", scopes=["openid"], claims={"sub": "uuid-1"})
