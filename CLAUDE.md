@@ -26,8 +26,10 @@ adding a tool.
 - `chatwoot_mcp/tiers.py`: `tier:none|agent|admin` and the one `auth=` check that filters tools by tier.
 - `chatwoot_mcp/shaping.py`: compact output, `<untrusted_content>` framing, truncation, web UI links.
   `confirmations.py`: two-step confirm tokens.
-- `chatwoot_mcp/tools/`: one module per Chatwoot area, each with `register(mcp, context)`; `context.py` holds the
-  session, the specs and the confirm helpers.
+- `chatwoot_mcp/tools/`: `read/` holds the tools that only read Chatwoot and `write/` the ones that change something
+  (including every `prepare_*` and confirm pair), one module per Chatwoot area in each, each with
+  `register(mcp, context)`. `__init__.py` maps area names to modules; `context.py` holds the session, the specs and
+  the confirm helpers. A new read-only tool goes in `read/`, anything else in `write/`.
 
 ## Commands
 
@@ -46,7 +48,8 @@ docker build --platform linux/amd64 .
 - Platform-only logic (Cognito, key fetching, Valkey storage) lives in `platform/` and is reached by a one-line hook,
   only when `COGNITO_USER_POOL_ID` is set.
 - Disabled tool modules never register. Each module has one `CHATWOOT_ENABLE_*` flag, read through
-  `env_flags.env_flag`; `replies` and `macros` are off by default. `CHATWOOT_READ_ONLY` keeps every write unregistered.
+  `env_flags.env_flag`; `replies` and `macros` are off by default. `CHATWOOT_READ_ONLY` skips the whole `write/` folder
+  (`tools/__init__.py`), so no module checks it.
 
 ## Tool conventions
 

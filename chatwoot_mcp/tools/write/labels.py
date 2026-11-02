@@ -1,9 +1,8 @@
-"""Labels on chats and customers: read them, and unless read-only add or remove them.
+"""Labels, write: add labels to a chat or a customer, and take them off a chat.
 
 ``POST .../labels`` **replaces** the whole set, so every write reads the current labels first and sends the
 result. Labels that do not exist in the account are refused instead of created, so no stray labels appear.
-Chatwoot stores label titles in lower case, so input is lower-cased before matching. Label titles are written
-by administrators and returned as they are.
+Chatwoot stores label titles in lower case, so input is lower-cased before matching.
 """
 
 from __future__ import annotations
@@ -15,9 +14,10 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
-from chatwoot_mcp.client.models import Label, rows
+from chatwoot_mcp.client.models import Label
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import ADD, OVERWRITE, READ, ContactId, ConversationId, ToolContext
+from chatwoot_mcp.tools.context import ADD, OVERWRITE, ContactId, ConversationId, ToolContext
+from chatwoot_mcp.tools.read.labels import current_labels
 
 MODULE = "labels"
 MAX_LABELS_PER_CALL = 20
@@ -25,32 +25,7 @@ MAX_LABELS_PER_CALL = 20
 Labels = Annotated[list[str], Field(min_length=1, max_length=MAX_LABELS_PER_CALL, description="Existing label titles.")]
 
 
-def current_labels(data: Any) -> list[str]:
-    return [label for label in rows(data) if isinstance(label, str)]
-
-
 def register(mcp: FastMCP, context: ToolContext) -> None:
-    async def read(path: str, key: str, item_id: int) -> dict[str, Any] | str:
-        try:
-            session = await context.session()
-            labels = current_labels(await session.get(path))
-        except ChatwootError as error:
-            return to_tool_error(error)
-        return {key: item_id, "labels": labels}
-
-    @mcp.tool(**context.tool("Get conversation labels", READ, module=MODULE, tier=Tier.AGENT))
-    async def get_conversation_labels(conversation_id: ConversationId) -> dict[str, Any] | str:
-        """List the labels on one chat."""
-        return await read(f"/conversations/{conversation_id}/labels", "conversation_id", conversation_id)
-
-    @mcp.tool(**context.tool("Get contact labels", READ, module=MODULE, tier=Tier.AGENT))
-    async def get_contact_labels(contact_id: ContactId) -> dict[str, Any] | str:
-        """List the labels on one customer."""
-        return await read(f"/contacts/{contact_id}/labels", "contact_id", contact_id)
-
-    if not context.writes_enabled:
-        return
-
     async def add(path: str, key: str, item_id: int, labels: list[str]) -> dict[str, Any] | str:
         wanted = [label.lower() for label in labels]
         try:

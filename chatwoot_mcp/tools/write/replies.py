@@ -1,5 +1,5 @@
 """Replies that reach the customer: ``prepare_send_reply`` then ``send_reply``, and ``prepare_create_conversation``
-then ``create_conversation``. Off by default (``CHATWOOT_ENABLE_REPLIES=true``), and absent when read-only.
+then ``create_conversation``. Off by default (``CHATWOOT_ENABLE_REPLIES=true``).
 
 A message cannot be unsent, so sending takes two calls. The ``prepare_*`` tool changes nothing: it looks up what the
 message would go to and returns a preview and a confirmation token bound to the caller, the action and the exact
@@ -61,8 +61,6 @@ def send_failure(error: ChatwootError, what: str) -> str:
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
-    if not context.writes_enabled:
-        return
 
     def reply_payload(conversation_id: int, content: str) -> dict[str, Any]:
         return {"conversation_id": conversation_id, "content": content}

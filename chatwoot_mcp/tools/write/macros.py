@@ -1,12 +1,10 @@
-"""Macros: ``list_macros``, then ``prepare_run_macro`` and ``run_macro``. Off by default
-(``CHATWOOT_ENABLE_MACROS=true``); the run tools are absent when read-only.
+"""Macros, write: ``prepare_run_macro`` then ``run_macro``. Off by default (``CHATWOOT_ENABLE_MACROS=true``).
 
 A macro is a saved set of steps (label, assign, resolve, message the customer, ...), so running one takes two calls:
 ``prepare_run_macro`` lists every step and warns about the ones that reach the customer or leave Chatwoot, and
 returns a token bound to the caller, the macro and the chat; ``run_macro`` spends it.
 
-Chatwoot runs a macro in a background job: ``execute`` answers at once and the steps happen shortly after. Macro
-names and steps are written by administrators and returned as they are.
+Chatwoot runs a macro in a background job: ``execute`` answers at once and the steps happen shortly after.
 """
 
 from __future__ import annotations
@@ -19,18 +17,17 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Conversation, Macro, payload
-from chatwoot_mcp.shaping import macro_steps, shape_macro, shape_person
+from chatwoot_mcp.shaping import macro_steps, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
     PREPARE,
-    READ,
     ConversationId,
     ToolContext,
     confirmation_refusal,
     prepared,
 )
-from chatwoot_mcp.tools.replies import send_failure
+from chatwoot_mcp.tools.write.replies import send_failure
 
 MODULE = "macros"
 ACTION = "run_macro"
@@ -50,19 +47,6 @@ def macro_payload(macro_id: int, conversation_id: int) -> dict[str, Any]:
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
-    @mcp.tool(**context.tool("List macros", READ, module=MODULE, tier=Tier.AGENT))
-    async def list_macros() -> dict[str, Any] | str:
-        """List the macros you can run: saved sets of steps, such as label, assign and resolve, with their steps."""
-        try:
-            session = await context.session()
-            macros = Macro.parse_rows(await session.get("/macros"))
-        except ChatwootError as error:
-            return to_tool_error(error)
-        return {"macros": [shape_macro(macro) for macro in macros[: context.max_items]]}
-
-    if not context.writes_enabled:
-        return
-
     @mcp.tool(**context.tool("Prepare to run macro", PREPARE, module=MODULE, tier=Tier.AGENT))
     async def prepare_run_macro(macro_id: MacroId, conversation_id: ConversationId) -> dict[str, Any] | str:
         """Preview running a macro on one chat and get a confirmation token. Nothing changes yet.

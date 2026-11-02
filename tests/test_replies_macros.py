@@ -3,7 +3,7 @@ from fastmcp import Client
 
 from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError
 from chatwoot_mcp.server import build_server
-from chatwoot_mcp.tools.replies import send_failure
+from chatwoot_mcp.tools.write.replies import send_failure
 from tests.conftest import FakeChatwoot
 from tests.helpers import unframed
 

@@ -4,7 +4,7 @@ import json
 import pytest
 from fastmcp.exceptions import ToolError
 
-from chatwoot_mcp.tools.reports import day_range
+from chatwoot_mcp.tools.read.reports import day_range
 from tests.conftest import REPORTS, FakeChatwoot, profile
 from tests.helpers import data
 

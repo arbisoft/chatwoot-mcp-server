@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from chatwoot_mcp.tools.conversations import snooze_seconds
+from chatwoot_mcp.tools.write.conversations import snooze_seconds
 from tests.helpers import data, unframed
 
 CHAT = {
