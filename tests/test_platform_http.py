@@ -419,9 +419,9 @@ def test_the_namespace_separates_deployments_sharing_one_valkey():
     second = PlatformSettings.from_env({**ENV, "CHATWOOT_INTERNAL_BASE_URL": "http://other-chatwoot:3000"})
     third = PlatformSettings.from_env({**ENV, "OIDC_CLIENT_ID": "other-client"})
 
-    assert len(first.namespace) == 12
-    assert len({first.namespace, second.namespace, third.namespace}) == 3
-    assert first.namespace == PlatformSettings.from_env(ENV).namespace
+    assert len(first.namespace(1)) == 12
+    assert len({first.namespace(1), first.namespace(2), second.namespace(1), third.namespace(1)}) == 4
+    assert first.namespace(1) == PlatformSettings.from_env(ENV).namespace(1)
 
 
 def test_a_bad_log_level_falls_back_to_info_in_community_mode(monkeypatch):

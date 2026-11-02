@@ -40,6 +40,7 @@ from chatwoot_mcp.client.errors import (
     MissingTokenError,
     PermissionDenied,
     ServerError,
+    UnexpectedResponseError,
     error_detail,
     error_for_status,
 )
@@ -121,8 +122,10 @@ def outcome_unknown(error: ChatwootError) -> bool:
 
 
 def accepted_but_unreadable(error: ChatwootError) -> bool:
-    """Chatwoot answered 2xx, so it acted, but the body could not be decoded."""
-    return isinstance(error, ChatwootAPIError) and error.status_code < 300
+    """Chatwoot answered 2xx, so it acted, but the body could not be decoded or had an unexpected shape."""
+    return isinstance(error, UnexpectedResponseError) or (
+        isinstance(error, ChatwootAPIError) and error.status_code < 300
+    )
 
 
 def query(params: Mapping[str, Any] | None) -> dict[str, Any]:

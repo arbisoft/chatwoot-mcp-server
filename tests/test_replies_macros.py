@@ -1,7 +1,7 @@
 import httpx
 from fastmcp import Client
 
-from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError
+from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError, UnexpectedResponseError
 from chatwoot_mcp.server import build_server
 from chatwoot_mcp.tools.write.replies import send_failure
 from tests.conftest import FakeChatwoot, unframed
@@ -83,6 +83,7 @@ def test_a_failed_send_says_whether_it_went():
     from chatwoot_mcp.client.errors import ChatwootAPIError
 
     assert "so it was sent" in send_failure(ChatwootAPIError(200, "response was not JSON"), "reply")
+    assert "so it was sent" in send_failure(UnexpectedResponseError("unexpected Message shape"), "reply")
 
 
 async def test_a_new_conversation_is_previewed_then_created(everything, fake):
@@ -96,6 +97,18 @@ async def test_a_new_conversation_is_previewed_then_created(everything, fake):
     assert preview["preview"]["inbox"]["name"] == "API" and "warning" in preview["preview"]
     assert fake.last_json("POST", "/conversations") == {"contact_id": 4, "inbox_id": 8, "message": {"content": "Hello"}}
     assert created["conversation_id"] == 22 and created["url"].endswith("/conversations/22")
+
+
+async def test_a_new_conversation_in_an_inbox_chatwoot_cannot_use_gets_no_token(everything, fake):
+    fake.on("GET", "/contacts/4", json={"payload": {"id": 4, "name": "Sam"}})
+    arguments = {"contact_id": 4, "inbox_id": 8}
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::FacebookPage"})
+    unsupported, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", arguments
+    )
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Email"})
+    no_email, _, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    assert "cannot start a chat" in unsupported and "contact's email" in no_email and fake.writes() == []
 
 
 async def test_replies_do_not_exist_unless_switched_on_or_when_read_only(settings, read_only, fake):
@@ -167,3 +180,19 @@ async def test_a_full_confirmation_store_fails_closed(everything, fake, monkeypa
     monkeypatch.setattr("chatwoot_mcp.confirmations.Confirmations.issue", broken)
     preview, _, _ = await two_steps(everything, fake, "prepare_send_reply", "send_reply", REPLY)
     assert "confirmation store is unavailable" in preview and fake.writes() == []
+
+
+async def test_a_macro_edited_after_the_preview_is_refused(everything, fake):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["refund"]}])
+    versions = [[{"action_name": "add_label", "action_params": ["refund"]}]]
+    edited = [{"action_name": "send_message", "action_params": ["Hi"]}]
+
+    def macro(_request):
+        # The preview reads the first version; every later read sees the edit.
+        actions = versions.pop() if versions else edited
+        return httpx.Response(200, json={"payload": {"id": 7, "name": "Refund", "actions": actions}})
+
+    fake.on("GET", "/macros/7", handler=macro)
+    arguments = {"macro_id": 7, "conversation_id": 12}
+    _, done, _ = await two_steps(everything, fake, "prepare_run_macro", "run_macro", arguments)
+    assert "steps no longer match" in done and fake.writes() == []

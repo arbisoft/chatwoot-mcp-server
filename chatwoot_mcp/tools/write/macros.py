@@ -2,9 +2,11 @@
 
 A macro is a saved set of steps (label, assign, resolve, message the customer, ...), so running one takes two calls:
 ``prepare_run_macro`` lists every step and warns about the ones that reach the customer or leave Chatwoot, and
-returns a token bound to the caller, the macro and the chat; ``run_macro`` spends it.
+returns a token bound to the caller, the chat, the macro and its exact steps; ``run_macro`` reads the macro again and
+spends the token only if the steps are unchanged.
 
-Chatwoot runs a macro in a background job: ``execute`` answers at once and the steps happen shortly after.
+Chatwoot runs a macro in a background job: ``execute`` answers at once and the steps happen shortly after. An edit to
+the macro in that short window is not caught.
 """
 
 from __future__ import annotations
@@ -44,8 +46,9 @@ OUTWARD_STEPS = {
 MacroId = Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")]
 
 
-def macro_payload(macro_id: int, conversation_id: int) -> dict[str, Any]:
-    return {"macro_id": macro_id, "conversation_id": conversation_id}
+def macro_payload(macro: Macro, conversation_id: int) -> dict[str, Any]:
+    actions = [action.model_dump(mode="json") for action in macro.actions]
+    return {"macro_id": macro.id, "conversation_id": conversation_id, "actions": actions}
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
@@ -77,7 +80,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         if outward:
             preview["warning"] = f"This macro {', and '.join(outward)}. That cannot be undone."
         return await prepared(
-            context, session, action=ACTION, payload=macro_payload(macro_id, conversation_id), preview=preview
+            context, session, action=ACTION, payload=macro_payload(macro, conversation_id), preview=preview
         )
 
     @mcp.tool(**context.tool("Run macro", IRREVERSIBLE, module=MODULE, tier=Tier.AGENT))
@@ -89,13 +92,14 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         """Run a macro the user approved, from prepare_run_macro's preview. The token works once."""
         try:
             session = await context.session()
+            macro = Macro.parse(payload(await session.get(f"/macros/{macro_id}")))
         except ChatwootError as error:
             return to_tool_error(error)
         refusal = await confirmation_refusal(
-            context, session, confirmation_token, action=ACTION, payload=macro_payload(macro_id, conversation_id)
+            context, session, confirmation_token, action=ACTION, payload=macro_payload(macro, conversation_id)
         )
         if refusal:
-            return refusal
+            return f"{refusal} (if the macro was edited since the preview, its steps no longer match)"
         try:
             await session.post(f"/macros/{macro_id}/execute", {"conversation_ids": [conversation_id]})
         except ChatwootError as error:

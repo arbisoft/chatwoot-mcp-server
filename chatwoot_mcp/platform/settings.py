@@ -86,10 +86,10 @@ class PlatformSettings:
         """``None`` (only with the explicit opt-out) lets client registration accept any redirect URI."""
         return None if self.allow_any_redirect_uri else list(self.allowed_redirect_uris)
 
-    @property
-    def namespace(self) -> str:
-        """Separates two deployments that share one Valkey database."""
-        return hashlib.sha256(f"{self.client_id}|{self.internal_url}".encode()).hexdigest()[:NAMESPACE_LENGTH]
+    def namespace(self, account_id: int) -> str:
+        """Separates two deployments that share one Valkey database, including ones on different accounts."""
+        seed = f"{self.client_id}|{self.internal_url}|{account_id}"
+        return hashlib.sha256(seed.encode()).hexdigest()[:NAMESPACE_LENGTH]
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> PlatformSettings:

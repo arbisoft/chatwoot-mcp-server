@@ -37,6 +37,15 @@ SEND_REPLY = "send_reply"
 CREATE_CONVERSATION = "create_conversation"
 MAX_MESSAGE_CHARS = 5000
 SENT_TO_CUSTOMER = "This message will be sent to the customer and cannot be unsent."
+# Inboxes Chatwoot can start a chat in, and the contact field each one needs (Chatwoot's ContactInboxBuilder).
+NEW_CHAT_CONTACT_FIELD: dict[str, str | None] = {
+    "Channel::Api": None,
+    "Channel::WebWidget": None,
+    "Channel::Email": "email",
+    "Channel::Sms": "phone_number",
+    "Channel::Whatsapp": "phone_number",
+    "Channel::TwilioSms": "phone_number",
+}
 
 InboxId = Annotated[int, Field(ge=1, description="The inbox to start the chat in. See list_inboxes.")]
 Content = Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="The message text.")]
@@ -144,6 +153,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             inbox = Inbox.parse(inbox_data)
         except ChatwootError as error:
             return to_tool_error(error)
+        if inbox.channel_type not in NEW_CHAT_CONTACT_FIELD:
+            return f"Error: Chatwoot cannot start a chat in a {inbox.channel_type} inbox; pick another inbox"
+        needed = NEW_CHAT_CONTACT_FIELD[inbox.channel_type]
+        if needed and not getattr(contact, needed):
+            return f"Error: this inbox needs the contact's {needed.replace('_', ' ')}, and the contact has none"
         preview = compact(
             {
                 "contact": shape_person(contact, source="contact"),

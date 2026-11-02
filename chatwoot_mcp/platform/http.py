@@ -118,7 +118,9 @@ def build_platform_server(
     )
     minter = TokenMinter(
         endpoint,
-        TokenCache(store, fernet_for(platform.key_material, CACHE_SALT), namespace=platform.namespace),
+        TokenCache(
+            store, fernet_for(platform.key_material, CACHE_SALT), namespace=platform.namespace(settings.account_id)
+        ),
         account_id=settings.account_id,
         default_email_domain=platform.default_email_domain,
         require_verified_email=platform.email_capture,
@@ -168,7 +170,9 @@ def build_platform_app(
     oauth_storage = build_oauth_storage(redis, platform.key_material) if redis is not None else None
     confirmations = (
         ValkeyConfirmationBackend(
-            redis, fernet_for(platform.key_material, CONFIRMATION_SALT), namespace=platform.namespace
+            redis,
+            fernet_for(platform.key_material, CONFIRMATION_SALT),
+            namespace=platform.namespace(settings.account_id),
         )
         if redis is not None
         else None

@@ -39,11 +39,11 @@ account, "Devkit", which every mPass user joins as an agent.
    (`https://chat-mcp.foss.local.dev/mcp`) also needs `https://chat-mcp.foss.local.dev/auth/callback` allowed on the
    Cognito client; until it is, that login fails with a redirect mismatch.
 
-To make yourself an administrator (for the reports tools):
+To make yourself an administrator (for the reports tools), with your own Chatwoot email in place of `YOUR_EMAIL`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.chatwoot.yml exec chatwoot \
-  bundle exec rails runner 'AccountUser.where(account_id: 1).update_all(role: :administrator)'
+  bundle exec rails runner 'AccountUser.find_by!(account_id: 1, user: User.find_by!(email: "YOUR_EMAIL")).administrator!'
 ```
 
 ## Clean up

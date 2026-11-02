@@ -71,8 +71,9 @@ read:
 ## Cache, re-checks and role changes
 
 - The key is cached under `chatwoot-mcp:key:v1:<namespace>:<sha256(identity)>` for a week, Fernet-encrypted with a key
-  derived from `OIDC_CLIENT_SECRET` (or `MCP_JWT_SIGNING_KEY`). The namespace is a short hash of `OIDC_CLIENT_ID` and
-  `CHATWOOT_INTERNAL_BASE_URL`, so two deployments sharing one Valkey database never read each other's keys. The value
+  derived from `OIDC_CLIENT_SECRET` (or `MCP_JWT_SIGNING_KEY`). The namespace is a short hash of `OIDC_CLIENT_ID`,
+  `CHATWOOT_INTERNAL_BASE_URL` and `CHATWOOT_ACCOUNT_ID`, so two deployments sharing one Valkey database never read
+  each other's keys or confirmations. The value
   holds the key, the account permissions, the tier and when it was last checked.
 - Every four hours the whole handoff runs again, so a user removed from the corporate ID or from the account loses
   access within four hours, and a role change is picked up. A key on its own does not pass the corporate gate.
