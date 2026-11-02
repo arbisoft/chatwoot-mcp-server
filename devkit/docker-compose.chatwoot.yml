@@ -1,0 +1,138 @@
+# Chatwoot fork and its MCP server on the devkit edge. Use it on top of the main file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.chatwoot.yml up -d --build
+#
+# Both build from the Chatwoot checkout next to this folder (../chatwoot). Run ./setup-chatwoot.sh once first.
+#
+#   https://chatwoot.foss.local.dev   Chatwoot behind the mPass login (strip headers, then mpass-auth)
+#   https://chat-mcp.foss.local.dev   the MCP server; no mpass-auth, FastMCP runs its own Cognito login
+#
+# Valkey: the edge uses DB 8 and 10. Chatwoot (Rails cache, Sidekiq, Action Cable) uses 4, the MCP uses 3.
+
+x-chatwoot: &chatwoot
+  build:
+    context: ../chatwoot
+    dockerfile: docker/Dockerfile
+  image: mpass-sso-devkit/chatwoot:dev
+  restart: unless-stopped
+  environment: &chatwoot-env
+    RAILS_ENV: production
+    NODE_ENV: production
+    INSTALLATION_ENV: docker
+    RAILS_LOG_TO_STDOUT: "true"
+    SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE:?run ./setup-chatwoot.sh}
+    FRONTEND_URL: https://chatwoot.${PLATFORM_DOMAIN}
+    POSTGRES_HOST: chatwoot-postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DATABASE: chatwoot
+    POSTGRES_USERNAME: postgres
+    POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD:?run ./setup-chatwoot.sh}
+    REDIS_URL: redis://valkey:6379/4
+    ENABLE_ACCOUNT_SIGNUP: "false"
+    # The SSO shim (lib/mpass/proxy_identity.rb, app/builders/mpass_user_builder.rb)
+    AUTH_TYPE: SSO
+    DEFAULT_EMAIL_DOMAIN: ${DEFAULT_EMAIL_DOMAIN}
+    SMB_CORPORATE_ID: ${SMB_CORPORATE_ID:-}
+    LOGOUT_REDIRECT_URL: https://${PLATFORM_DOMAIN}
+  networks:
+    - backend
+
+services:
+  chatwoot-postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatwoot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${CHATWOOT_POSTGRES_PASSWORD:?run ./setup-chatwoot.sh}
+    volumes:
+      - chatwoot-postgres:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chatwoot:
+    <<: *chatwoot
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      oauth2-proxy:
+        condition: service_started
+    entrypoint: docker/entrypoints/rails.sh
+    # First boot: create the schema and one account, which every SSO user joins as an agent.
+    command:
+      - sh
+      - -c
+      - >-
+        bundle exec rails db:chatwoot_prepare &&
+        bundle exec rails runner 'Account.exists? || Account.create!(name: "Devkit")' &&
+        exec bundle exec rails s -p 3000 -b 0.0.0.0
+    volumes:
+      - chatwoot-storage:/app/storage
+    networks:
+      - frontend
+      - backend
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.chatwoot.loadbalancer.server.port=3000
+      - traefik.http.routers.chatwoot.rule=Host(`chatwoot.${PLATFORM_DOMAIN}`)
+      - traefik.http.routers.chatwoot.entrypoints=websecure
+      - traefik.http.routers.chatwoot.service=chatwoot
+      - traefik.http.routers.chatwoot.middlewares=strip-auth-headers@docker,security-headers@docker,mpass-auth@docker
+      # Built assets and the health check load without a login.
+      - traefik.http.routers.chatwoot-public.rule=Host(`chatwoot.${PLATFORM_DOMAIN}`) && (PathPrefix(`/vite/`) || PathPrefix(`/brand-assets/`) || Path(`/health`))
+      - traefik.http.routers.chatwoot-public.entrypoints=websecure
+      - traefik.http.routers.chatwoot-public.service=chatwoot
+      - traefik.http.routers.chatwoot-public.priority=20
+      - traefik.http.routers.chatwoot-public.middlewares=strip-auth-headers@docker,security-headers@docker
+
+  chatwoot-sidekiq:
+    <<: *chatwoot
+    depends_on:
+      - chatwoot
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    volumes:
+      - chatwoot-storage:/app/storage
+
+  chatwoot-mcp:
+    build:
+      context: ../chatwoot/mcp
+    image: mpass-sso-devkit/chatwoot-mcp:dev
+    restart: unless-stopped
+    depends_on:
+      - chatwoot
+    environment:
+      MCP_BASE_URL: https://chat-mcp.${PLATFORM_DOMAIN}
+      COGNITO_USER_POOL_ID: ap-southeast-1_APxascxtS
+      COGNITO_AWS_REGION: ap-southeast-1
+      # The browser goes to the mPass bridge; the token exchange stays on the internal network.
+      COGNITO_UPSTREAM_AUTH_URL: https://auth.${PLATFORM_DOMAIN}/authorize
+      COGNITO_UPSTREAM_TOKEN_URL: http://mpass-auth-proxy:8000/token
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      MCP_OAUTH_STORAGE_URL: redis://valkey:6379/3
+      CHATWOOT_INTERNAL_BASE_URL: http://chatwoot:3000
+      CHATWOOT_PUBLIC_URL: https://chatwoot.${PLATFORM_DOMAIN}
+      CHATWOOT_ACCOUNT_ID: "1"
+      DEFAULT_EMAIL_DOMAIN: ${DEFAULT_EMAIL_DOMAIN}
+      LAUNCHPAD_EMAIL_CAPTURE: "false"
+    networks:
+      - frontend
+      - backend
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.chatwoot-mcp.loadbalancer.server.port=8215
+      - traefik.http.routers.chatwoot-mcp.rule=Host(`chat-mcp.${PLATFORM_DOMAIN}`)
+      - traefik.http.routers.chatwoot-mcp.entrypoints=websecure
+      - traefik.http.routers.chatwoot-mcp.service=chatwoot-mcp
+      - traefik.http.routers.chatwoot-mcp.middlewares=strip-auth-headers@docker,security-headers@docker
+
+volumes:
+  chatwoot-postgres:
+  chatwoot-storage:
