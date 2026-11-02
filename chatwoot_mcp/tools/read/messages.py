@@ -1,7 +1,7 @@
 """Messages, read: ``get_messages``.
 
 Chatwoot returns the latest 20 messages when no ids are given, up to 20 before ``before``, and up to 100 after
-``after``.
+``after``. With both, Chatwoot includes the ``after`` message itself, so the lower bound is moved up by one.
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         """Read a chat's messages, oldest first. With no ids, the latest 20; pass `before` to read further back."""
         try:
             session = await context.session()
-            data = await session.get(f"/conversations/{conversation_id}/messages", {"before": before, "after": after})
+            lower = after + 1 if after is not None and before is not None else after
+            data = await session.get(f"/conversations/{conversation_id}/messages", {"before": before, "after": lower})
             items, cut = limited(Message.parse_rows(data), context.max_items)
         except ChatwootError as error:
             return to_tool_error(error)
@@ -42,7 +43,6 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             "messages": [shape_message(m, max_chars=context.max_chars) for m in items],
         }
         if cut:
-            out["truncated"] = (
-                f"Only the first {context.max_items} messages are shown. Call again with after={items[-1].id}."
-            )
+            again = f"after={items[-1].id}" + (f" and before={before}" if before is not None else "")
+            out["truncated"] = f"Only the first {context.max_items} messages are shown. Call again with {again}."
         return out

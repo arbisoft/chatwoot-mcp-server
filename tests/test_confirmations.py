@@ -106,3 +106,18 @@ async def test_the_memory_store_has_a_global_cap(clock):
         await confirmations.issue(identity="c", action="x", payload={})
     # The refused record did not take one of c's slots.
     assert confirmations._live("c") == {}
+
+
+async def test_tokens_spent_on_another_replica_free_the_limit(backend, clock):
+    # Two replicas share one store but count their own previews.
+    first = Confirmations(backend, ttl_seconds=60, clock=clock, max_outstanding_per_identity=3)
+    second = Confirmations(backend, ttl_seconds=60, clock=clock, max_outstanding_per_identity=3)
+    tokens = [await first.issue(identity="ada", action="send_reply", payload=PAYLOAD) for _ in range(3)]
+    for token in tokens:
+        await second.consume(token, identity="ada", action="send_reply", payload=PAYLOAD)
+
+    assert await first.issue(identity="ada", action="send_reply", payload=PAYLOAD)
+    for _ in range(2):
+        await first.issue(identity="ada", action="send_reply", payload=PAYLOAD)
+    with pytest.raises(ConfirmationLimitError):
+        await first.issue(identity="ada", action="send_reply", payload=PAYLOAD)

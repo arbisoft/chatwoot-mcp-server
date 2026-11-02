@@ -50,6 +50,8 @@ class ConfirmationBackend(Protocol):
         """Atomically return and delete the value, or ``None`` if absent or expired."""
         ...
 
+    async def exists(self, key: str) -> bool: ...
+
 
 class MemoryConfirmationBackend:
     """No lock: no method awaits. The full-store sweep runs only when the cap is reached."""
@@ -75,6 +77,10 @@ class MemoryConfirmationBackend:
         if entry is None or entry[1] <= self._clock():
             return None
         return entry[0]
+
+    async def exists(self, key: str) -> bool:
+        entry = self._values.get(key)
+        return entry is not None and entry[1] > self._clock()
 
 
 def payload_digest(payload: Any) -> str:
@@ -118,7 +124,7 @@ class Confirmations:
         key = _storage_key(token)
         expires_at = self._clock() + self._ttl
         value = json.dumps(asdict(_Record(identity, action, payload_digest(payload), expires_at)))
-        self._reserve(identity, key, expires_at)
+        await self._reserve(identity, key, expires_at)
         try:
             await self._backend.put(key, value, self._ttl)
         except BaseException:
@@ -145,8 +151,11 @@ class Confirmations:
         now = self._clock()
         return {key: expiry for key, expiry in self._outstanding.get(identity, {}).items() if expiry > now}
 
-    def _reserve(self, identity: str, key: str, expires_at: float) -> None:
+    async def _reserve(self, identity: str, key: str, expires_at: float) -> None:
         live = self._live(identity)
+        if len(live) >= self._max_outstanding:
+            # Another replica may have spent some of these: count only the ones still in the shared store.
+            live = {held: expiry for held, expiry in live.items() if await self._backend.exists(held)}
         if len(live) >= self._max_outstanding:
             raise ConfirmationLimitError(
                 f"you already have {len(live)} actions waiting for confirmation; confirm them or let them expire "

@@ -194,3 +194,6 @@ class ValkeyConfirmationBackend:
             return self._fernet.decrypt(sealed.encode()).decode()
         except InvalidToken:
             return None
+
+    async def exists(self, key: str) -> bool:
+        return await self._store.get(self._key(key)) is not None

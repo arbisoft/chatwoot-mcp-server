@@ -3,6 +3,9 @@
 ``POST .../labels`` **replaces** the whole set, so every write reads the current labels first and sends the
 result. Labels that do not exist in the account are refused instead of created, so no stray labels appear.
 Chatwoot stores label titles in lower case, so input is lower-cased before matching.
+
+Chatwoot offers no atomic add or remove, and its own UI replaces the set the same way, so two writers in the same
+instant can still overwrite each other. A lock here could not cover the UI, other agents or automations.
 """
 
 from __future__ import annotations

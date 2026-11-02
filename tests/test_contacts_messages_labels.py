@@ -83,6 +83,16 @@ async def test_get_messages_frames_text_and_says_where_to_continue(settings, fak
     assert out["labels"] == ["vip"] and out["messages"][0]["content"].startswith("<untrusted_content")
 
 
+async def test_get_messages_between_two_ids_skips_the_lower_one_and_keeps_both_bounds(settings, fake):
+    messages = [{"id": i, "content": f"m{i}", "message_type": 0} for i in (41, 42, 43)]
+    fake.on("GET", "/conversations/12/messages", json={"payload": messages})
+    arguments = {"conversation_id": 12, "after": 40, "before": 50}
+    out = await data(dataclasses.replace(settings, max_items=2), fake, "get_messages", arguments)
+    # Chatwoot includes `after` itself when `before` is also given.
+    assert fake.calls("GET", "/conversations/12/messages")[-1].url.params["after"] == "41"
+    assert "after=42 and before=50" in out["truncated"]
+
+
 async def test_a_private_note_asks_for_private_and_refuses_success_otherwise(settings, fake):
     fake.on("POST", "/conversations/12/messages", json={"id": 70, "content": "x", "message_type": 1, "private": True})
     out = await data(settings, fake, "add_private_note", {"conversation_id": 12, "content": "call back"})
