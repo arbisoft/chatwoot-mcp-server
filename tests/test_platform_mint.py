@@ -222,3 +222,12 @@ async def test_a_rate_limited_recheck_keeps_the_working_key(store, clock):
     assert (await minter.token_for(ADA)).token == first.token
     chatwoot.throttle_sign_in = False
     assert (await minter.token_for(ADA)).checked_at == clock.now
+
+
+async def test_a_store_outage_while_reading_refusals_is_a_cache_error(clock):
+    class DownStore(MemoryKeyValue):
+        async def get(self, key):
+            raise ConnectionError("valkey is down")
+
+    with pytest.raises(TokenCacheError):
+        await minter_for(FakeSsoChatwoot(), DownStore(clock), clock).token_for(ADA)

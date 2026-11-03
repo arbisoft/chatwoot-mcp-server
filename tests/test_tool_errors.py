@@ -50,7 +50,8 @@ ARGUMENTS = {
 }
 EVERY_TOOL = sorted(READ_TOOLS | WRITE_TOOLS | RESOLVE_TOOLS | OPT_IN_READ_TOOLS | CONFIRMED_TOOLS)
 CONFIRMING = {"send_reply", "create_conversation", "run_macro", "resolve_conversation"}
-NOTE_WRITES = {"add_private_note", "add_contact_note"}
+# Writes that are never retried say whether they happened; a 2xx means they did.
+NOTE_WRITES = {"add_private_note", "add_contact_note", "create_contact"}
 REPORTS = {"get_report_summary", "get_report_by_group", "get_first_response_distribution", "list_csat_responses"}
 
 
@@ -97,8 +98,7 @@ async def test_every_tool_turns_a_chatwoot_failure_into_a_plain_error(everything
         if name in CONFIRMING:
             continue
         if name in NOTE_WRITES and status == 200:
-            # A 2xx means the note was saved, whatever the body says.
-            assert "so it was saved" in result, f"{name}: {result}"
+            assert "so it was" in result, f"{name}: {result}"
             continue
         if status == 401 and "Invalid" in str(body) and name in REPORTS:
             # The role cannot be read with a rejected key, so reports fail closed before calling Chatwoot.

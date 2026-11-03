@@ -20,8 +20,9 @@ The key never revokes or resets: it is the same key the user may use elsewhere. 
 Fernet-encrypted under the deployment namespace and ``sha256(identity)`` for a week, and re-checked through the
 full handoff every four hours, so a user removed from the corporate ID loses access within that time. Removing a
 user from the Chatwoot account does not: the fork's SSO handoff re-joins a user with no memberships as an agent, for
-the web login and this server alike, so access is revoked in mPass or the corporate gate. A refusal (corporate gate
-or no membership) is remembered for five minutes, so a refused user does not re-run the handoff on every call. A
+the web login and this server alike, so access is revoked in mPass or the corporate gate. A refusal (corporate gate,
+no membership, or the fork's ``sso_failed`` handoff error) is remembered for five minutes, so a refused user does
+not re-run the handoff on every call. A
 re-check that Chatwoot rate-limits keeps the cached key and tries again on the next call. A role-gated refusal only
 sets a "due" flag behind a ``SET NX EX`` limiter (at most once per five minutes per identity). A 401 (the user reset
 their key) drops the entry and fetches again. Every fetch, re-check and denial writes one ``chatwoot_mcp.audit``
@@ -174,10 +175,16 @@ class TokenCache:
         return f"{DENIED_KEY_PREFIX}{self._namespace}:{identity_key}"
 
     async def denial(self, identity_key: str) -> str | None:
-        return await self._store.get(self.denied_key(identity_key))
+        try:
+            return await self._store.get(self.denied_key(identity_key))
+        except Exception as exc:
+            raise TokenCacheError("the key cache could not be read; try again shortly") from exc
 
     async def deny(self, identity_key: str, reason: str) -> None:
-        await self._store.set(self.denied_key(identity_key), reason, DENIED_TTL_SECONDS)
+        try:
+            await self._store.set(self.denied_key(identity_key), reason, DENIED_TTL_SECONDS)
+        except Exception as exc:
+            raise TokenCacheError("the key cache could not be updated; try again shortly") from exc
 
     async def load(self, identity_key: str) -> CacheEntry:
         try:

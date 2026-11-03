@@ -18,6 +18,8 @@ LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 DEFAULT_HTTP_PORT = 8215
 DEFAULT_CONFIRM_TTL_SECONDS = 600
 DEFAULT_MAX_ITEMS = 25
+# Chatwoot sends chats 25 per page; a smaller limit would cut every page and leave its tail unreachable.
+MIN_MAX_ITEMS = 25
 DEFAULT_MAX_TEXT_CHARS = 2000
 TOOL_MODULES = (
     "reference",
@@ -125,7 +127,7 @@ class Settings:
             read_only=env_flag("CHATWOOT_READ_ONLY", environ=env),
             filter_tools_by_role=env_flag("CHATWOOT_FILTER_TOOLS_BY_ROLE", environ=env),
             confirm_ttl_seconds=positive_int_setting(env, "CHATWOOT_CONFIRM_TTL_SECONDS", DEFAULT_CONFIRM_TTL_SECONDS),
-            max_items=positive_int_setting(env, "CHATWOOT_MAX_ITEMS", DEFAULT_MAX_ITEMS),
+            max_items=_max_items(env),
             max_text_chars=positive_int_setting(env, "CHATWOOT_MAX_TEXT_CHARS", DEFAULT_MAX_TEXT_CHARS),
             enabled_modules=frozenset(
                 module
@@ -164,6 +166,13 @@ def positive_int_setting(env: Mapping[str, str], name: str, default: int) -> int
     if not (raw.isascii() and raw.isdigit()) or int(raw) < 1:
         raise ConfigError(f"{name}={raw!r} must be a whole number of at least 1")
     return int(raw)
+
+
+def _max_items(env: Mapping[str, str]) -> int:
+    value = positive_int_setting(env, "CHATWOOT_MAX_ITEMS", DEFAULT_MAX_ITEMS)
+    if value < MIN_MAX_ITEMS:
+        raise ConfigError(f"CHATWOOT_MAX_ITEMS must be at least {MIN_MAX_ITEMS}, Chatwoot's page size for chats")
+    return value
 
 
 def _required_int(env: Mapping[str, str], name: str) -> int:

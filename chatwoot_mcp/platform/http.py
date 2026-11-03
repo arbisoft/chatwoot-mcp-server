@@ -27,6 +27,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING
 
 import httpx
@@ -44,6 +45,7 @@ from chatwoot_mcp.confirmations import ConfirmationBackend
 from chatwoot_mcp.credentials import API_KEY_MOUNT_PATH, api_key_mount
 from chatwoot_mcp.platform.cognito import ChatwootCognitoProvider
 from chatwoot_mcp.platform.credentials import MintedCredentialProvider, platform_tier_resolver
+from chatwoot_mcp.platform.identity import current_identity, identity_for
 from chatwoot_mcp.platform.mint import CACHE_SALT, TokenCache, TokenEndpoint, TokenMinter
 from chatwoot_mcp.platform.settings import REFRESH_TOKEN_FALLBACK_SECONDS, PlatformSettings, community_settings
 from chatwoot_mcp.platform.storage import (
@@ -126,7 +128,10 @@ def build_platform_server(
         default_email_domain=platform.default_email_domain,
         require_verified_email=platform.email_capture,
     )
-    credentials = MintedCredentialProvider(minter)
+    trust_overlay = platform.email_capture
+    credentials = MintedCredentialProvider(
+        minter, identity_source=partial(current_identity, trust_overlay=trust_overlay)
+    )
     client = ChatwootClient(
         settings.chatwoot_url,
         timeout_seconds=settings.timeout_seconds,
@@ -138,7 +143,9 @@ def build_platform_server(
         settings,
         client=client,
         credentials=credentials,
-        tier_resolver=platform_tier_resolver(credentials),
+        tier_resolver=platform_tier_resolver(
+            credentials, identity_of=partial(identity_for, trust_overlay=trust_overlay)
+        ),
         confirmation_backend=confirmation_backend,
         auth=build_cognito_provider(platform, oauth_storage),
     )

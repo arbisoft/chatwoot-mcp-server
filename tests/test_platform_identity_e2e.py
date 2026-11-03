@@ -33,6 +33,8 @@ ENV = {
     "CHATWOOT_ACCOUNT_ID": "5",
     "DEFAULT_EMAIL_DOMAIN": "askii.ai",
     "MCP_ALLOWED_CLIENT_REDIRECT_URIS": "https://claude.ai/api/mcp/auth_callback",
+    # The id_tokens below carry the overlay's stamp, which only exists (and is only trusted) with capture on.
+    "LAUNCHPAD_EMAIL_CAPTURE": "true",
 }
 DISCOVERY = OIDCConfiguration(
     strict=False,

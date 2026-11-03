@@ -1,10 +1,11 @@
 """Who the caller is, read from the token :mod:`chatwoot_mcp.platform.cognito` validated.
 
 The identity is the id_token's ``email`` when it looks like one and is trustworthy (Cognito marked it
-``email_verified``, or mpass-auth-proxy's overlay wrote it), else ``cognito:username``, which is what the web
-login keys on. It is lowercased, as Chatwoot's Mpass::ProxyIdentity does, and
-is the ``X-Auth-Request-Email`` the mint bootstraps with. Caches and locks
-key on ``sha256(identity)``, never the identity itself.
+``email_verified``, or, with ``LAUNCHPAD_EMAIL_CAPTURE`` on, mpass-auth-proxy's overlay wrote it), else
+``cognito:username``, which is what the web login keys on. With capture off the overlay never runs and the token is
+Cognito's own, where a user who may edit their attributes could forge the overlay's stamp, so it is not trusted.
+It is lowercased, as Chatwoot's Mpass::ProxyIdentity does, and is the ``X-Auth-Request-Email`` the mint
+bootstraps with. Caches and locks key on ``sha256(identity)``, never the identity itself.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ def _non_empty(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def identity_email_for(claims: Mapping[str, Any] | None) -> str | None:
+def identity_email_for(claims: Mapping[str, Any] | None, *, trust_overlay: bool = False) -> str | None:
     """The SSO identity for the bootstrap header, or ``None`` off the Cognito path."""
     upstream = _upstream(claims)
     if upstream is None:
@@ -58,7 +59,7 @@ def identity_email_for(claims: Mapping[str, Any] | None) -> str | None:
     username = _non_empty(upstream.get(COGNITO_USERNAME_CLAIM))
     email = _non_empty(upstream.get(EMAIL_CLAIM))
     # The overlay stamps preferred_username with the caller's own cognito:username when it writes `email`.
-    overlaid = username is not None and _non_empty(upstream.get(PREFERRED_USERNAME_CLAIM)) == username
+    overlaid = trust_overlay and username is not None and _non_empty(upstream.get(PREFERRED_USERNAME_CLAIM)) == username
     if email and "@" in email and (upstream.get(EMAIL_VERIFIED_CLAIM) is True or overlaid):
         return email
     return username
@@ -132,14 +133,14 @@ class Identity:
         return not self.stamped_by_overlay
 
 
-def identity_for(token: AccessToken | None) -> Identity | None:
+def identity_for(token: AccessToken | None, *, trust_overlay: bool = False) -> Identity | None:
     claims = token.claims if token is not None else None
-    email = identity_email_for(claims)
+    email = identity_email_for(claims, trust_overlay=trust_overlay)
     if email is None:
         return None
     upstream = _upstream(claims) or {}
     return Identity(email=email.lower(), access_token=upstream_access_token_for(claims), claims=dict(upstream))
 
 
-def current_identity() -> Identity | None:
-    return identity_for(stored_access_token())
+def current_identity(*, trust_overlay: bool = False) -> Identity | None:
+    return identity_for(stored_access_token(), trust_overlay=trust_overlay)

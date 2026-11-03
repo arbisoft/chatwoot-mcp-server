@@ -23,7 +23,13 @@ def claims(**upstream) -> dict:
 def test_identity_prefers_a_verified_or_overlaid_email():
     verified = claims(email="ada@example.com", email_verified=True, **{"cognito:username": "sid"})
     overlaid = claims(email="ada@example.com", preferred_username="sid", **{"cognito:username": "sid"})
-    assert identity_email_for(verified) == identity_email_for(overlaid) == "ada@example.com"
+    assert identity_email_for(verified) == identity_email_for(overlaid, trust_overlay=True) == "ada@example.com"
+
+
+def test_the_overlay_stamp_is_ignored_when_the_overlay_does_not_run():
+    # With email capture off the token is Cognito's own, so preferred_username proves nothing.
+    forged = claims(email="boss@example.com", preferred_username="sid", **{"cognito:username": "sid"})
+    assert identity_email_for(forged) == "sid"
 
 
 def test_an_unverified_email_is_never_trusted():
@@ -130,7 +136,7 @@ def test_identity_for_carries_the_cognito_username():
         claims=claims(email="Jane@AskII.ai", preferred_username="sid-9", **{"cognito:username": "sid-9"}),
     )
 
-    found = identity_for(token)
+    found = identity_for(token, trust_overlay=True)
 
     assert found.cognito_username == "sid-9"
     assert found.is_synthetic("askii.ai") is False

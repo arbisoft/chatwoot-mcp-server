@@ -75,7 +75,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         items, cut = limited(rows, context.max_items)
         return {
             **page_info(page, cut, context.max_items),
-            "counts": body.get("meta"),
+            "counts": shape_report(body.get("meta")),
             "conversations": [shape_conversation(c, context.links, max_chars=context.max_chars) for c in items],
         }
 
@@ -133,7 +133,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         """Find chats by detailed conditions, for example high priority and unassigned, or no activity for 3 days.
 
         Examples: {"field": "assignee_id", "operator": "is_not_present"};
-        {"field": "last_activity_at", "operator": "days_before", "values": [3]};
+        {"field": "last_activity_at", "operator": "days_before", "values": ["3"]};
         {"field": "priority", "operator": "equal_to", "values": ["high"]}.
         """
         join = "and" if match == "all" else "or"

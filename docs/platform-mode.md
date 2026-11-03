@@ -53,8 +53,9 @@ Chatwoot. On a user's first call, or when their cached key needs checking, it op
 The key is never reset or revoked: it is the same key the user may use elsewhere, and resetting it would break
 those.
 
-The identity is the id_token's `email` (lowercased) when Cognito marks it `email_verified` or mpass-auth-proxy's
-overlay wrote it (`preferred_username == cognito:username`); otherwise it is `cognito:username`, which is what the web
+The identity is the id_token's `email` (lowercased) when Cognito marks it `email_verified` or, with
+`LAUNCHPAD_EMAIL_CAPTURE` on, mpass-auth-proxy's overlay wrote it (`preferred_username == cognito:username`; with
+capture off the overlay never runs, so that stamp is ignored); otherwise it is `cognito:username`, which is what the web
 login (oauth2-proxy's `user-id-claim`) keys on. An email a user could set themselves is never trusted. An unverified
 platform user carries exactly `<cognito:username>@<DEFAULT_EMAIL_DOMAIN>`, and Chatwoot's `Mpass::ProxyIdentity`
 turns a value without `@` into `<value>@DEFAULT_EMAIL_DOMAIN`.
@@ -82,7 +83,7 @@ read:
   hours, and a role change is picked up. A key on its own does not pass the corporate gate.
 - Removing a user from the Chatwoot account does **not** revoke access: the fork's SSO handoff re-joins any user with
   no memberships as an agent, for the web login and this server alike. Revoke access in mPass or the corporate gate.
-- A refused user (corporate gate, or no membership) is remembered for five minutes, so they do not re-run the
+- A refused user (corporate gate, no membership, or the fork's `sso_failed` handoff error) is remembered for five minutes, so they do not re-run the
   handoff, and its database writes, on every call.
 - Every fetch signs in at `POST /auth/sign_in` from this server's one address, and Chatwoot's Rack::Attack allows
   five per five minutes per IP. **Add the server's address to Chatwoot's `RACK_ATTACK_ALLOWED_IPS`** (exact IPs, so

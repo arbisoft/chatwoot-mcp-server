@@ -73,12 +73,12 @@ def send_failure(error: ChatwootError, what: str, *, done: str = "sent") -> str:
     """After a failed write that is never retried: say whether it happened (surely not, maybe, or yes)."""
     if accepted_but_unreadable(error):
         return (
-            f"Error: Chatwoot accepted the {what}, so it was {done}, but its answer could not be read; check the chat"
+            f"Error: Chatwoot accepted the {what}, so it was {done}, but its answer could not be read; check Chatwoot"
         )
     if never_sent(error):
         return f"{to_tool_error(error)}; nothing was {done}, try again"
     if outcome_unknown(error):
-        return f"{to_tool_error(error)}; the {what} may or may not have been {done}. Check the chat before trying again"
+        return f"{to_tool_error(error)}; the {what} may or may not have been {done}. Check Chatwoot before trying again"
     return to_tool_error(error)
 
 

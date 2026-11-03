@@ -13,7 +13,7 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Contact, Conversation, Note, payload
-from chatwoot_mcp.shaping import shape_contact, shape_conversation, shape_note
+from chatwoot_mcp.shaping import shape_contact, shape_conversation, shape_note, shape_report
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     READ,
@@ -34,7 +34,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         items, cut = limited(Contact.parse_rows(data), context.max_items)
         return {
             **page_info(page, cut, context.max_items),
-            "meta": as_dict(data).get("meta"),
+            "meta": shape_report(as_dict(data).get("meta")),
             "contacts": [shape_contact(c, context.links) for c in items],
         }
 

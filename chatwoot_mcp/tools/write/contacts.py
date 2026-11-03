@@ -64,10 +64,13 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return "Error: give at least one of email, phone_number or identifier"
         try:
             session = await context.session()
+        except ChatwootError as error:
+            return to_tool_error(error)
+        try:
             created = payload(await session.post("/contacts", {"name": name, **fields}))
             contact = Contact.parse(created.get("contact"))
         except ChatwootError as error:
-            return to_tool_error(error)
+            return send_failure(error, "contact", done="created")
         return shape_contact(contact, context.links)
 
     @mcp.tool(**context.tool("Update contact", OVERWRITE, module=MODULE, tier=Tier.AGENT))
