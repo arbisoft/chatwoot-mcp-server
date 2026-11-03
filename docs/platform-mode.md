@@ -83,8 +83,8 @@ read:
   hours, and a role change is picked up. A key on its own does not pass the corporate gate.
 - Removing a user from the Chatwoot account does **not** revoke access: the fork's SSO handoff re-joins any user with
   no memberships as an agent, for the web login and this server alike. Revoke access in mPass or the corporate gate.
-- A refused user (corporate gate, no membership, or the fork's `sso_failed` handoff error) is remembered for five minutes, so they do not re-run the
-  handoff, and its database writes, on every call.
+- A refused user (corporate gate, no membership, or the fork's `sso_failed` handoff error) is remembered for five
+  minutes, so they do not re-run the handoff, and its database writes, on every call.
 - Every fetch signs in at `POST /auth/sign_in` from this server's one address, and Chatwoot's Rack::Attack allows
   five per five minutes per IP. **Add the server's address to Chatwoot's `RACK_ATTACK_ALLOWED_IPS`** (exact IPs, so
   give the container a fixed address; `devkit/` shows how). Without it, a re-check that is throttled keeps the
