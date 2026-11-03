@@ -18,6 +18,7 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Label
+from chatwoot_mcp.shaping import shape_labels
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import ADD, OVERWRITE, ContactId, ConversationId, ToolContext
 from chatwoot_mcp.tools.read.labels import current_labels
@@ -42,7 +43,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             saved = current_labels(await session.post(path, {"labels": merged}))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {key: item_id, "labels": saved}
+        return {key: item_id, "labels": shape_labels(saved, source=f"{key.removesuffix('_id')}_label", item_id=item_id)}
 
     @mcp.tool(**context.tool("Add conversation labels", ADD, module=MODULE, tier=Tier.AGENT))
     async def add_conversation_labels(conversation_id: ConversationId, labels: Labels) -> dict[str, Any] | str:
@@ -65,4 +66,5 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             saved = current_labels(await session.post(path, {"labels": kept}))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {"conversation_id": conversation_id, "labels": saved}
+        labels = shape_labels(saved, source="conversation_label", item_id=conversation_id)
+        return {"conversation_id": conversation_id, "labels": labels}

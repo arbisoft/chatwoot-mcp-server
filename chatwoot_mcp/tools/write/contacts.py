@@ -19,6 +19,7 @@ from chatwoot_mcp.tools.context import (
     OVERWRITE,
     ContactId,
     ToolContext,
+    send_failure,
 )
 
 MODULE = "contacts"
@@ -107,7 +108,10 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return "Error: the note is empty"
         try:
             session = await context.session()
-            note = Note.parse(await session.post(f"/contacts/{contact_id}/notes", {"note": {"content": content}}))
         except ChatwootError as error:
             return to_tool_error(error)
+        try:
+            note = Note.parse(await session.post(f"/contacts/{contact_id}/notes", {"note": {"content": content}}))
+        except ChatwootError as error:
+            return send_failure(error, "note", done="saved")
         return {"contact_id": contact_id, **shape_note(note, max_chars=context.max_chars)}

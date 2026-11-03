@@ -82,6 +82,15 @@ class UnprocessableError(ChatwootAPIError):
     """HTTP 422: Chatwoot rejected the request body."""
 
 
+class RenewalError(ChatwootError):
+    """Chatwoot rejected the key, so the request did nothing, and fetching a new key then failed."""
+
+    def __init__(self, cause: ChatwootError) -> None:
+        super().__init__(
+            f"the key was rejected and a new one could not be fetched: {to_tool_error(cause).removeprefix('Error: ')}"
+        )
+
+
 class RateLimitedError(ChatwootAPIError):
     """HTTP 429: Chatwoot is throttling this client."""
 

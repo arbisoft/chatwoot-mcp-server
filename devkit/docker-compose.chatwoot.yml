@@ -9,6 +9,10 @@
 #   https://chat-mcp.foss.local.dev   the MCP server; no mpass-auth, FastMCP runs its own Cognito login
 #
 # Valkey: the edge uses DB 8 and 10. Chatwoot (Rails cache, Sidekiq, Action Cable) uses 4, the MCP uses 3.
+#
+# The MCP calls Chatwoot over its own small network from a fixed address, which Chatwoot safelists in
+# RACK_ATTACK_ALLOWED_IPS: every key fetch signs in from that one address, and Rack::Attack allows only five sign-ins
+# per five minutes per IP.
 
 x-chatwoot: &chatwoot
   build:
@@ -74,11 +78,17 @@ services:
         bundle exec rails db:chatwoot_prepare &&
         bundle exec rails runner 'Account.exists? || Account.create!(name: "Devkit")' &&
         exec bundle exec rails s -p 3000 -b 0.0.0.0
+    environment:
+      <<: *chatwoot-env
+      RACK_ATTACK_ALLOWED_IPS: 172.30.215.10
     volumes:
       - chatwoot-storage:/app/storage
     networks:
-      - frontend
-      - backend
+      frontend:
+      backend:
+      chatwoot-internal:
+        aliases:
+          - chatwoot-internal
     labels:
       - traefik.enable=true
       - traefik.http.services.chatwoot.loadbalancer.server.port=3000
@@ -118,14 +128,16 @@ services:
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       MCP_OAUTH_STORAGE_URL: redis://valkey:6379/3
-      CHATWOOT_INTERNAL_BASE_URL: http://chatwoot:3000
+      CHATWOOT_INTERNAL_BASE_URL: http://chatwoot-internal:3000
       CHATWOOT_PUBLIC_URL: https://chatwoot.${PLATFORM_DOMAIN}
       CHATWOOT_ACCOUNT_ID: "1"
       DEFAULT_EMAIL_DOMAIN: ${DEFAULT_EMAIL_DOMAIN}
       LAUNCHPAD_EMAIL_CAPTURE: "false"
     networks:
-      - frontend
-      - backend
+      frontend:
+      backend:
+      chatwoot-internal:
+        ipv4_address: 172.30.215.10
     labels:
       - traefik.enable=true
       - traefik.http.services.chatwoot-mcp.loadbalancer.server.port=8215
@@ -133,6 +145,12 @@ services:
       - traefik.http.routers.chatwoot-mcp.entrypoints=websecure
       - traefik.http.routers.chatwoot-mcp.service=chatwoot-mcp
       - traefik.http.routers.chatwoot-mcp.middlewares=strip-auth-headers@docker,security-headers@docker
+
+networks:
+  chatwoot-internal:
+    ipam:
+      config:
+        - subnet: 172.30.215.0/24
 
 volumes:
   chatwoot-postgres:

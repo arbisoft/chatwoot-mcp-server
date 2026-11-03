@@ -6,7 +6,10 @@
   notes, survey feedback, custom attribute text) is wrapped in ``<untrusted_content source=... id=...>``. Inside
   the frame every ``&`` and every ``<`` (and its look-alikes) is escaped and invisible format characters are
   removed, so no spelling of a tag can close the frame and pose as instructions. Names that only administrators
-  write (inboxes, teams, labels, macros, articles, canned responses) are returned as they are.
+  write (inboxes, teams, label definitions, macros, articles) are returned as they are.
+- Labels on a chat or contact, custom attribute keys and attachment extensions are returned as they are only when
+  they have the shape Chatwoot itself allows for a label title or attribute key (letters, digits, ``_``, ``-``,
+  ``.``); anything else, which only the API or the widget can write, is framed like other user text.
 - Long text is cut to the configured length with a ``truncated`` flag.
 - Conversations and contacts carry a ``url`` into the Chatwoot web UI, built from ``CHATWOOT_PUBLIC_URL``
   (falling back to ``CHATWOOT_URL``).
@@ -15,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
@@ -37,6 +41,9 @@ UNTRUSTED_NOTICE = (
     "Inside a block, &lt; and &amp; stand for < and &; decode them before reusing the text."
 )
 ATTRIBUTE_VALUE_CHARS = 200
+MAX_ATTRIBUTES = 50
+# Chatwoot's own format for label titles and custom attribute keys, with a length cap.
+_PLAIN_NAME = re.compile(r"[\w.\-]{1,100}")
 MESSAGE_TYPES = {0: "incoming", 1: "outgoing", 2: "activity", 3: "template"}
 
 _LESS_THAN_LOOKALIKES = "<﹤＜‹〈⟨〈❬❮˂"
@@ -62,6 +69,15 @@ def untrusted_field(text: Any, *, source: str, item_id: int | str | None) -> str
     if text is None or text == "":
         return None
     return f'<{UNTRUSTED_TAG} source="{source}" id="{item_id}">{escape_untrusted(str(text))}</{UNTRUSTED_TAG}>'
+
+
+def plain_or_framed(value: str, *, source: str, item_id: int | str | None) -> str | None:
+    """A label, attribute key or extension as it is when it has a plain name's shape, else framed."""
+    return value if _PLAIN_NAME.fullmatch(value) else untrusted_field(value, source=source, item_id=item_id)
+
+
+def shape_labels(labels: list[Any], *, source: str, item_id: int | str | None) -> list[str]:
+    return [plain_or_framed(label, source=source, item_id=item_id) for label in labels if isinstance(label, str)]
 
 
 @dataclass(frozen=True)
@@ -120,7 +136,8 @@ def shape_person(person: Person | None, *, source: str) -> dict[str, Any] | None
 def shape_attributes(values: dict[str, Any], *, source: str, item_id: int) -> dict[str, Any]:
     """Custom attributes: the website widget lets visitors set them, so text, lists and objects are untrusted.
 
-    Chatwoot stores them as JSON, so only numbers, booleans and null pass through as they are.
+    Chatwoot stores them as JSON, so only numbers, booleans and null pass through as they are. Keys are checked like
+    labels, and at most ``MAX_ATTRIBUTES`` are returned.
     """
 
     def shaped(value: Any) -> Any:
@@ -129,7 +146,21 @@ def shape_attributes(values: dict[str, Any], *, source: str, item_id: int) -> di
         text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
         return untrusted_field(text[:ATTRIBUTE_VALUE_CHARS], source=source, item_id=item_id)
 
-    return {key: shaped(value) for key, value in values.items()}
+    return {
+        plain_or_framed(key, source=f"{source}_key", item_id=item_id): shaped(value)
+        for key, value in list(values.items())[:MAX_ATTRIBUTES]
+    }
+
+
+def shape_report(value: Any, *, source: str = "report") -> Any:
+    """Report and count payloads: numbers pass through; any text (agent, inbox or label names) is framed."""
+    if isinstance(value, dict):
+        return {key: shape_report(item, source=source) for key, item in value.items()}
+    if isinstance(value, list):
+        return [shape_report(item, source=source) for item in value]
+    if isinstance(value, str):
+        return untrusted_field(value, source=source, item_id=None)
+    return value
 
 
 def message_type(raw: int | str | None) -> str:
@@ -145,7 +176,9 @@ def shape_attachment(attachment: Attachment) -> dict[str, Any]:
             "id": attachment.id,
             "message_id": attachment.message_id,
             "file_type": attachment.file_type,
-            "extension": attachment.extension,
+            "extension": plain_or_framed(attachment.extension, source="attachment_extension", item_id=attachment.id)
+            if attachment.extension
+            else None,
             "file_size": attachment.file_size,
             "created_at": attachment.created_at,
             "sender": shape_person(attachment.sender, source="attachment_sender"),
@@ -181,7 +214,7 @@ def shape_conversation(conversation: Conversation, links: Links, *, max_chars: i
             "priority": conversation.priority,
             "inbox_id": conversation.inbox_id,
             "channel": meta.channel,
-            "labels": conversation.labels,
+            "labels": shape_labels(conversation.labels, source="conversation_label", item_id=conversation.id),
             "unread_count": conversation.unread_count,
             "can_reply": conversation.can_reply,
             "muted": conversation.muted,
@@ -239,14 +272,15 @@ def shape_note(note: Note, *, max_chars: int) -> dict[str, Any]:
 
 
 def shape_csat(response: CsatResponse, *, max_chars: int) -> dict[str, Any]:
-    feedback = response.feedback_message
+    feedback = truncate(response.feedback_message or "", max_chars)
     return compact(
         {
             "id": response.id,
             "rating": response.rating,
-            "feedback": frame_untrusted(truncate(feedback, max_chars).text, source="csat_feedback", item_id=response.id)
-            if feedback
+            "feedback": frame_untrusted(feedback.text, source="csat_feedback", item_id=response.id)
+            if feedback.text
             else None,
+            "truncated": feedback.truncated or None,
             "conversation_id": response.conversation_id,
             "contact": shape_person(response.contact, source="csat_contact"),
             "agent": shape_person(response.assigned_agent, source="csat_agent"),

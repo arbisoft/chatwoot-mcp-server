@@ -12,12 +12,16 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
+
+from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 
 from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings, env_flag, positive_int_setting, read_setting
 
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
 REFRESH_TOKEN_FALLBACK_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_SCOPES = ("openid",)
+SIGNING_KEY_STRETCH_SALT = "chatwoot-mcp-signing-key"
 # The MCP clients people use, as in Pressingly/plane-mcp-server. MCP_ALLOWED_CLIENT_REDIRECT_URIS adds to these, so
 # onboarding a new client (Askii, say) is a config change, not a release.
 DEFAULT_REDIRECT_URIS = (
@@ -76,10 +80,16 @@ class PlatformSettings:
     http_api_key_route: bool = False
     email_capture: bool = False
 
-    @property
+    @cached_property
     def key_material(self) -> str:
-        """Entropy for the Fernet keys: the client secret when there is one (confidential client)."""
-        return self.client_secret or self.jwt_signing_key
+        """Entropy for the Fernet keys: the client secret, or else ``MCP_JWT_SIGNING_KEY`` stretched with PBKDF2.
+
+        The signing key is typed by an operator, so it gets the same slow derivation FastMCP gives it, once per
+        process, before the per-store HKDF in ``fernet_for``.
+        """
+        if self.client_secret:
+            return self.client_secret
+        return derive_jwt_key(low_entropy_material=self.jwt_signing_key, salt=SIGNING_KEY_STRETCH_SALT).decode()
 
     @property
     def redirect_allowlist(self) -> list[str] | None:

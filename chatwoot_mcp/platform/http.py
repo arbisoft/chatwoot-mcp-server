@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import sys
@@ -145,9 +146,22 @@ def build_platform_server(
     return mcp
 
 
-def build_api_key_app(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> StarletteWithLifespan:
-    """The community server for ``/http/api-key``: each caller's own ``X-Chatwoot-Token``."""
-    return build_server(settings, transport=transport).http_app(path=MCP_PATH, stateless_http=True)
+def build_api_key_app(
+    settings: Settings,
+    transport: httpx.AsyncBaseTransport | None,
+    confirmation_backend: ConfirmationBackend | None = None,
+) -> StarletteWithLifespan:
+    """The community server for ``/http/api-key``: each caller's own ``X-Chatwoot-Token``.
+
+    In platform mode it shares the confirmation store with ``/mcp``, so every replica can confirm, and always hides
+    tools from callers whose role cannot use them.
+    """
+    server = build_server(
+        dataclasses.replace(settings, filter_tools_by_role=True),
+        transport=transport,
+        confirmation_backend=confirmation_backend,
+    )
+    return server.http_app(path=MCP_PATH, stateless_http=True)
 
 
 def served_paths(platform: PlatformSettings) -> tuple[str, ...]:
@@ -185,7 +199,7 @@ def build_platform_app(
         confirmation_backend=confirmations,
         transport=transport,
     ).http_app(path=MCP_PATH, stateless_http=True)
-    api_key_apps = [build_api_key_app(settings, transport)] if platform.http_api_key_route else []
+    api_key_apps = [build_api_key_app(settings, transport, confirmations)] if platform.http_api_key_route else []
     sub_apps = [platform_app, *api_key_apps]
 
     @asynccontextmanager

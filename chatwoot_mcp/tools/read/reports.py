@@ -15,7 +15,7 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import CsatResponse
-from chatwoot_mcp.shaping import shape_csat
+from chatwoot_mcp.shaping import shape_csat, shape_report
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, ChatwootSession, ToolContext, as_dict, limited, page_info, tier_error
 
@@ -91,7 +91,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             data = await report("/reports/summary", params)
         except ChatwootError as error:
             return to_tool_error(error)
-        return as_dict(data)
+        return shape_report(as_dict(data))
 
     @mcp.tool(**context.tool("Get report by group", READ, module=MODULE, tier=Tier.ADMIN))
     async def get_report_by_group(
@@ -114,9 +114,9 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         except ChatwootError as error:
             return to_tool_error(error)
         if not isinstance(data, list):
-            return as_dict(data)
+            return shape_report(as_dict(data))
         shown, cut = limited(data, context.max_items)
-        out: dict[str, Any] = {"rows": shown}
+        out: dict[str, Any] = {"rows": shape_report(shown)}
         if cut:
             out["truncated"] = f"Only the first {context.max_items} rows are shown."
         return out
@@ -132,7 +132,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             data = await report("/reports/first_response_time_distribution", {"since": start, "until": end})
         except ChatwootError as error:
             return to_tool_error(error)
-        return as_dict(data)
+        return shape_report(as_dict(data))
 
     @mcp.tool(**context.tool("List CSAT responses", READ, module=MODULE, tier=Tier.ADMIN))
     async def list_csat_responses(
@@ -159,6 +159,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             "inbox_id": inbox_id,
             "team_id": team_id,
             "page": page,
+            "sort": "-created_at",
         }
         try:
             session = await context.session()

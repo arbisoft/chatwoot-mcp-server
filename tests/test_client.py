@@ -17,6 +17,7 @@ from chatwoot_mcp.client.errors import (
     PermissionDenied,
     RateLimitedError,
     RedirectedError,
+    RenewalError,
     ServerError,
     UnprocessableError,
     error_for_status,
@@ -27,6 +28,7 @@ from chatwoot_mcp.client.http import (
     outcome_unknown,
     query,
 )
+from chatwoot_mcp.tools.context import send_failure
 from tests.conftest import BASE, RecordingTransport
 
 KEY = "secret-key-123"
@@ -253,3 +255,16 @@ async def test_chatwoot_reason_is_read_from_its_different_error_shapes():
         with pytest.raises(UnprocessableError) as raised:
             await client.get("/x", token=KEY)
         assert raised.value.detail == reason
+
+
+async def test_a_failed_key_renewal_says_the_request_did_nothing():
+    async def failing(error, token):
+        raise ServerError(502, "bad gateway")
+
+    client, transport = client_for(
+        lambda r: httpx.Response(401, json={"error": "Invalid Access Token"}), on_rejected=failing
+    )
+    with pytest.raises(RenewalError) as raised:
+        await client.request("POST", "/conversations/1/messages", token=KEY, json={"content": "hi"})
+    assert never_sent(raised.value) and "server error" in str(raised.value)
+    assert "nothing was sent" in send_failure(raised.value, "reply") and len(transport.requests) == 1

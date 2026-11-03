@@ -4,12 +4,14 @@ FastMCP's ``AWSCognitoProvider`` validates the Cognito access token, which
 carries no ``email`` and, for federated users, an opaque ``username``. The
 mint needs the identity the browser login uses, so this provider:
 
-- decodes the id_token at exchange and refresh time and keeps
-  ``{id_token, email, cognito:username}`` (:meth:`_extract_upstream_claims`);
-- re-reads the id_token, and the raw upstream access token for the
-  corporate-ID gate, from the upstream token store on every request and fails
-  closed when it is missing (:meth:`load_access_token`). The copy sealed in
-  the issued JWT is a snapshot that a transparent refresh never updates;
+- seals nothing into the JWTs it issues to MCP clients: they are signed, not
+  encrypted, and a sealed id_token would let anyone holding a client's bearer
+  replay it at the SSO edge;
+- reads the id_token, and the raw upstream access token for the corporate-ID
+  gate, from the upstream token store on every request and fails closed when it
+  is missing (:meth:`load_access_token`);
+- raises when that store is down, so an outage is a server error rather than a
+  401 that sends every client through a new login;
 - corrects the upstream ``expires_in`` on both grants
   (:func:`_correct_expires_in`).
 
@@ -37,9 +39,12 @@ logger = logging.getLogger(__name__)
 UPSTREAM_CLAIMS_KEY = "upstream_claims"
 ID_TOKEN_KEY = "id_token"
 EMAIL_CLAIM = "email"
+EMAIL_VERIFIED_CLAIM = "email_verified"
 COGNITO_USERNAME_CLAIM = "cognito:username"
 PREFERRED_USERNAME_CLAIM = "preferred_username"
 ACCESS_TOKEN_CLAIM = "access_token"
+
+STORE_PROBE_KEY = "chatwoot-mcp-store-probe"
 
 MIN_EXPIRES_IN_SECONDS = 60
 EXPIRES_IN_DRIFT_TOLERANCE_SECONDS = 1
@@ -114,7 +119,9 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
     async def _extract_upstream_claims(
         self, idp_tokens: dict[str, Any], *, include_access_token: bool = False
     ) -> dict[str, Any] | None:
-        """Claims sealed into the issued JWT; the raw access token only on the per-request path."""
+        """The caller's identity claims, read per request; ``None`` when FastMCP asks for claims to seal."""
+        if not include_access_token:
+            return None
         id_token = _string(idp_tokens.get(ID_TOKEN_KEY))
         if id_token is None:
             logger.warning("the Cognito token response has no id_token; the caller's identity is unknown")
@@ -127,9 +134,10 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
         extracted = {
             ID_TOKEN_KEY: id_token,
             EMAIL_CLAIM: _string(claims.get(EMAIL_CLAIM)),
+            EMAIL_VERIFIED_CLAIM: True if claims.get(EMAIL_VERIFIED_CLAIM) is True else None,
             COGNITO_USERNAME_CLAIM: _string(claims.get(COGNITO_USERNAME_CLAIM)),
             PREFERRED_USERNAME_CLAIM: _string(claims.get(PREFERRED_USERNAME_CLAIM)),
-            ACCESS_TOKEN_CLAIM: _string(idp_tokens.get(ACCESS_TOKEN_CLAIM)) if include_access_token else None,
+            ACCESS_TOKEN_CLAIM: _string(idp_tokens.get(ACCESS_TOKEN_CLAIM)),
         }
         return {key: value for key, value in extracted.items() if value is not None}
 
@@ -137,6 +145,8 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
         """Attach the current id_token identity, or reject the request when it cannot be found."""
         validated = await super().load_access_token(token)
         if validated is None:
+            # The base turns every store error into ``None``; read the store once so an outage raises instead.
+            await self._jti_mapping_store.get(key=STORE_PROBE_KEY)
             return None
         upstream = await self._resolve_upstream_claims(token)
         if not upstream or not upstream.get(ID_TOKEN_KEY):

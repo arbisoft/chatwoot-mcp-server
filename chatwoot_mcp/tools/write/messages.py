@@ -16,7 +16,7 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Message
 from chatwoot_mcp.shaping import shape_message
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import CREATE, ConversationId, ToolContext
+from chatwoot_mcp.tools.context import CREATE, ConversationId, ToolContext, send_failure
 
 MODULE = "messages"
 MAX_NOTE_CHARS = 5000
@@ -36,9 +36,12 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         body = {"content": content, "message_type": "outgoing", "private": True}
         try:
             session = await context.session()
-            message = Message.parse(await session.post(f"/conversations/{conversation_id}/messages", body))
         except ChatwootError as error:
             return to_tool_error(error)
+        try:
+            message = Message.parse(await session.post(f"/conversations/{conversation_id}/messages", body))
+        except ChatwootError as error:
+            return send_failure(error, "note", done="saved")
         if not message.private:
             # Never report success for something that might have reached the customer.
             return "Error: Chatwoot did not mark the message private; check the chat in Chatwoot right away"

@@ -36,8 +36,9 @@ it is fixed. Please give us a reasonable time to release a fix before disclosing
   `X-Chatwoot-Token` to the internal Chatwoot URL, which skips the SSO proxy and the corporate-ID gate. It is only
   mounted when `CHATWOOT_HTTP_API_KEY_ROUTE=true`, with a startup warning. Do not rely on a router rule to hide it
   instead: a path-prefix exclusion can be bypassed with an encoded path such as `/http%2Fapi-key/mcp`.
-- **Writes are on unless `CHATWOOT_READ_ONLY=true`.** None of them reach a customer; the ones that do (replies,
-  macros) are separate modules, off by default, behind a confirmation step.
+- **Writes are on unless `CHATWOOT_READ_ONLY=true`.** Of the default writes, only resolving a chat can reach the
+  customer (Chatwoot may send a satisfaction survey), so it goes through a confirmation step. Replies and macros reach
+  the customer directly; they are separate modules, off by default, also behind a confirmation step.
 
 ## Out of scope
 

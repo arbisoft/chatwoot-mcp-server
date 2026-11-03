@@ -10,6 +10,7 @@ The HTTP app serves the MCP endpoint on:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 SERVER_NAME = "chatwoot"
 MCP_PATH = "/mcp"
+# Reading the static key's role at start-up is best effort; it must not keep a stdio client waiting.
+WARM_TIMEOUT_SECONDS = 5
 INSTRUCTIONS = (
     "Works with support conversations in Chatwoot, using the caller's own Chatwoot key and permissions. "
     f"{UNTRUSTED_NOTICE} "
@@ -98,7 +101,8 @@ def build_server(
 async def _warm(static: StaticCredentialProvider) -> None:
     """Best effort: a Chatwoot that is down or answers oddly must never stop the server starting."""
     try:
-        await static.warm()
+        async with asyncio.timeout(WARM_TIMEOUT_SECONDS):
+            await static.warm()
     except Exception:
         logger.warning("could not read the static key's Chatwoot role at startup", exc_info=True)
 

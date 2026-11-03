@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Attachment, Conversation
-from chatwoot_mcp.shaping import shape_attachment, shape_conversation
+from chatwoot_mcp.shaping import shape_attachment, shape_conversation, shape_report
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     READ,
@@ -58,12 +58,12 @@ class Condition(BaseModel):
         ),
     )
     operator: FilterOperator
-    values: list[str | int] = Field(
+    values: list[str] = Field(
         default_factory=list,
         max_length=20,
         description=(
-            "What to compare with. Dates as 2026-10-01; days_before takes a number of days (1 to 998); "
-            "is_present and is_not_present take none."
+            'What to compare with, as text: ids, numbers and true/false too ("12", "true"). Dates as '
+            "2026-10-01; days_before takes a number of days (1 to 998); is_present and is_not_present take none."
         ),
     )
 
@@ -173,7 +173,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             data = as_dict(await session.get("/conversations/meta", params))
         except ChatwootError as error:
             return to_tool_error(error)
-        return as_dict(data.get("meta"))
+        return shape_report(as_dict(data.get("meta")))
 
     @mcp.tool(**context.tool("List conversation attachments", READ, module=MODULE, tier=Tier.AGENT))
     async def list_conversation_attachments(conversation_id: ConversationId, page: Page = 1) -> dict[str, Any] | str:

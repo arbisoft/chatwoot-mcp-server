@@ -18,10 +18,14 @@ Chatwoot URL, which the public SSO proxy does not front:
 
 The key never revokes or resets: it is the same key the user may use elsewhere. The result is cached
 Fernet-encrypted under the deployment namespace and ``sha256(identity)`` for a week, and re-checked through the
-full handoff every four hours, so a user removed from the corporate ID or from the account loses access within that
-time. A role-gated refusal only sets a "due" flag behind a ``SET NX EX`` limiter (at most once per five minutes per
-identity). A 401 (the user reset their key) drops the entry and fetches again. Every fetch, re-check and denial
-writes one ``chatwoot_mcp.audit`` line, without the key or the email.
+full handoff every four hours, so a user removed from the corporate ID loses access within that time. Removing a
+user from the Chatwoot account does not: the fork's SSO handoff re-joins a user with no memberships as an agent, for
+the web login and this server alike, so access is revoked in mPass or the corporate gate. A refusal (corporate gate
+or no membership) is remembered for five minutes, so a refused user does not re-run the handoff on every call. A
+re-check that Chatwoot rate-limits keeps the cached key and tries again on the next call. A role-gated refusal only
+sets a "due" flag behind a ``SET NX EX`` limiter (at most once per five minutes per identity). A 401 (the user reset
+their key) drops the entry and fetches again. Every fetch, re-check and denial writes one ``chatwoot_mcp.audit``
+line, without the key or the email.
 
 With ``LAUNCHPAD_EMAIL_CAPTURE`` on, synthetic identities are refused before any request, because the first request
 would create a duplicate of the user the launchpad later relinks. With it off they are let in: that address is the
@@ -48,6 +52,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from chatwoot_mcp.client.errors import (
     ChatwootError,
     ChatwootTransportError,
+    RateLimitedError,
     UnexpectedResponseError,
     error_detail,
     error_for_status,
@@ -75,6 +80,8 @@ FORBIDDEN_RECHECK_INTERVAL_SECONDS = 5 * 60
 CACHE_KEY_PREFIX = "chatwoot-mcp:key:v1:"
 RECHECK_LIMIT_KEY_PREFIX = "chatwoot-mcp:recheck-limit:v1:"
 RECHECK_DUE_KEY_PREFIX = "chatwoot-mcp:recheck-due:v1:"
+DENIED_KEY_PREFIX = "chatwoot-mcp:denied:v1:"
+DENIED_TTL_SECONDS = 5 * 60
 CACHE_SALT = "chatwoot-mcp-key-cache"
 DEFAULT_NAMESPACE = "local"
 
@@ -162,6 +169,15 @@ class TokenCache:
 
     def due_key(self, identity_key: str) -> str:
         return f"{RECHECK_DUE_KEY_PREFIX}{self._namespace}:{identity_key}"
+
+    def denied_key(self, identity_key: str) -> str:
+        return f"{DENIED_KEY_PREFIX}{self._namespace}:{identity_key}"
+
+    async def denial(self, identity_key: str) -> str | None:
+        return await self._store.get(self.denied_key(identity_key))
+
+    async def deny(self, identity_key: str, reason: str) -> None:
+        await self._store.set(self.denied_key(identity_key), reason, DENIED_TTL_SECONDS)
 
     async def load(self, identity_key: str) -> CacheEntry:
         try:
@@ -409,10 +425,14 @@ class TokenMinter:
         return MintedToken(token=token, permissions=profile.permissions, tier=profile.tier, checked_at=self._clock())
 
     async def _fetch(self, identity: Identity) -> MintedToken:
+        denial = await self._cache.denial(identity.key)
+        if denial is not None:
+            raise HandoffDeniedError(denial)
         try:
             return await self._bootstrap(identity)
         except (HandoffDeniedError, NotAMemberError) as error:
             await self._cache.drop(identity.key)
+            await self._cache.deny(identity.key, str(error))
             _audit("key.denied", identity, reason=type(error).__name__)
             raise
 
@@ -423,7 +443,12 @@ class TokenMinter:
         return minted
 
     async def _recheck(self, identity: Identity, cached: MintedToken) -> MintedToken:
-        minted = await self._fetch(identity)
+        try:
+            minted = await self._fetch(identity)
+        except RateLimitedError:
+            # ponytail: retried on each call until the sign-in gets through; RACK_ATTACK_ALLOWED_IPS avoids it.
+            _audit("key.recheck_deferred", identity, cached, reason="rate_limited")
+            return cached
         await self._store(identity, minted)
         unchanged = minted.token == cached.token and minted.permissions == cached.permissions
         _audit("key.recheck_unchanged" if unchanged else "key.fetched", identity, minted, reason="recheck")

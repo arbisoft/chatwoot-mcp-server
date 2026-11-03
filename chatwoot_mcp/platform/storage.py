@@ -2,8 +2,9 @@
 
 - :func:`parse_storage_url` validates ``MCP_OAUTH_STORAGE_URL`` and maps the ``valkey(s)://`` aliases to
   ``redis(s)://``, keeping the query string (``?ssl_cert_reqs=none``) that ``RedisStore(url=...)`` would drop.
-- :func:`build_oauth_storage` wraps a ``RedisStore`` in a ``FernetEncryptionWrapper`` for FastMCP's OAuth state,
-  keyed like FastMCP's own file store so a rotated secret invalidates both alike.
+- :func:`build_oauth_storage` wraps a ``RedisStore`` in a ``FernetEncryptionWrapper`` for FastMCP's OAuth state.
+  Every Fernet key here comes from ``PlatformSettings.key_material`` (already stretched when it is an operator-typed
+  signing key) through HKDF with a per-store salt.
 - :class:`KeyValue` is the small async surface the key cache and its re-check markers use, with a Valkey and an
   in-process implementation.
 - :class:`ValkeyConfirmationBackend` keeps two-step confirmations in Valkey, encrypted, for every replica.

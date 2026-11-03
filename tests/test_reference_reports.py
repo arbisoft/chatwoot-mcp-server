@@ -38,8 +38,12 @@ async def test_reference_lists_keep_only_their_fields(settings, fake):
     fake.on("GET", "/teams", json=[{"id": 2, "name": "Support"}])
     fake.on("GET", "/teams/2/team_members", json=[{"id": 8, "name": "Ana"}])
     fake.on("GET", "/labels", json={"payload": [{"id": 1, "title": "vip", "color": "#fff"}]})
-    assert await data(settings, fake, "list_inboxes") == {"inboxes": [{"id": 1, "name": "Web", "channel_type": "web"}]}
+    assert await data(settings, fake, "list_inboxes") == {
+        "page": 1,
+        "inboxes": [{"id": 1, "name": "Web", "channel_type": "web"}],
+    }
     assert await data(settings, fake, "list_agents") == {
+        "page": 1,
         "agents": [
             {
                 "id": 8,
@@ -47,14 +51,15 @@ async def test_reference_lists_keep_only_their_fields(settings, fake):
                 "email": '<untrusted_content source="agent_email" id="8">a@x</untrusted_content>',
                 "role": "agent",
             }
-        ]
+        ],
     }
-    assert await data(settings, fake, "list_teams") == {"teams": [{"id": 2, "name": "Support"}]}
+    assert await data(settings, fake, "list_teams") == {"page": 1, "teams": [{"id": 2, "name": "Support"}]}
     assert await data(settings, fake, "list_team_members", {"team_id": 2}) == {
         "team_id": 2,
+        "page": 1,
         "members": [{"id": 8, "name": '<untrusted_content source="agent_name" id="8">Ana</untrusted_content>'}],
     }
-    assert await data(settings, fake, "list_labels") == {"labels": [{"id": 1, "title": "vip"}]}
+    assert await data(settings, fake, "list_labels") == {"page": 1, "labels": [{"id": 1, "title": "vip"}]}
 
 
 async def test_reference_details(settings, fake):
@@ -77,16 +82,20 @@ async def test_reference_details(settings, fake):
         "id": 1,
         "short_code": '<untrusted_content source="canned_short_code" id="1">hi</untrusted_content>',
         "content": '<untrusted_content source="canned_response" id="1">xxxxx</untrusted_content>',
+        "truncated": True,
     }
     out = await data(settings, fake, "list_custom_attribute_definitions", {"model": "contact"})
     assert fake.calls("GET", "/custom_attribute_definitions")[-1].url.params["attribute_model"] == "contact_attribute"
     assert out["custom_attributes"][0]["attribute_key"] == "order"
 
 
-async def test_a_list_cut_at_the_limit_says_so(settings, fake):
-    fake.on("GET", "/teams", json=[{"id": i} for i in range(1, 5)])
-    out = await data(dataclasses.replace(settings, max_items=2), fake, "list_teams")
-    assert len(out["teams"]) == 2 and "first 2" in out["truncated"]
+async def test_a_long_reference_list_is_paged_so_every_item_is_reachable(settings, fake):
+    fake.on("GET", "/teams", json=[{"id": i} for i in range(1, 6)])
+    small = dataclasses.replace(settings, max_items=2)
+    first = await data(small, fake, "list_teams")
+    last = await data(small, fake, "list_teams", {"page": 3})
+    assert [t["id"] for t in first["teams"]] == [1, 2] and first["next_page"] == 2
+    assert [t["id"] for t in last["teams"]] == [5] and "next_page" not in last
 
 
 async def test_help_articles_show_status_and_are_cut(settings, fake):
@@ -95,7 +104,7 @@ async def test_help_articles_show_status_and_are_cut(settings, fake):
     out = await data(
         dataclasses.replace(settings, max_text_chars=10), fake, "search_help_articles", {"query": "refund"}
     )
-    assert out["articles"] == [{"id": 2, "title": "Refunds", "status": "draft", "content": "x" * 10}]
+    assert out["articles"] == [{"id": 2, "title": "Refunds", "status": "draft", "content": "x" * 10, "truncated": True}]
 
 
 # --- reports ------------------------------------------------------------------------------------

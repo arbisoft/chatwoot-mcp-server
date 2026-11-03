@@ -93,7 +93,10 @@ def test_settings_defaults():
     assert settings.log_level == "INFO"
     assert settings.email_capture is False
     assert settings.http_api_key_route is False
-    assert settings.key_material == "k"
+    # An operator-typed signing key is stretched with PBKDF2 before any Fernet key is derived from it.
+    assert settings.key_material != "k" and len(settings.key_material) == 44
+    same_key = PlatformSettings.from_env({**ENV, "OIDC_CLIENT_SECRET": "", "MCP_JWT_SIGNING_KEY": "k"})
+    assert settings.key_material == same_key.key_material
 
 
 @pytest.mark.parametrize(
@@ -103,8 +106,6 @@ def test_settings_defaults():
         (" TRUE ", True),
         ("1", True),
         ("false", False),
-        ("ture", False),
-        ("enabled", False),
         ("no", False),
         ("", False),
     ],
@@ -432,3 +433,9 @@ def test_a_bad_log_level_falls_back_to_info_in_community_mode(monkeypatch):
     seen: dict = {}
     cli.configure_logging()
     assert seen["level"] == "INFO"
+
+
+@pytest.mark.parametrize("raw", ["ture", "enabled", '"true"'])
+def test_a_flag_typo_stops_start_up(raw):
+    with pytest.raises(ConfigError, match="CHATWOOT_HTTP_API_KEY_ROUTE"):
+        PlatformSettings.from_env({**ENV, "CHATWOOT_HTTP_API_KEY_ROUTE": raw})

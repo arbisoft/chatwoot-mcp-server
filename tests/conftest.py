@@ -201,6 +201,7 @@ class FakeSsoChatwoot(RecordingTransport):
         self.sso_mode = sso_mode
         self.corporate_gate = corporate_gate
         self.fail_sign_in = False
+        self.throttle_sign_in = False
         self.handoff_error: str | None = None
         super().__init__(self._dispatch)
 
@@ -246,6 +247,8 @@ class FakeSsoChatwoot(RecordingTransport):
         )
 
     def _sign_in(self, request: httpx.Request) -> httpx.Response:
+        if self.throttle_sign_in:
+            return httpx.Response(429, json={"error": "Retry later"})
         body = json.loads(request.content)
         email = self.handoffs.pop(body.get("sso_auth_token", ""), None)
         if self.fail_sign_in or email is None or email != body.get("email") or "password" in body:

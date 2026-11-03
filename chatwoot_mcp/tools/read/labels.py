@@ -1,5 +1,5 @@
-"""Labels, read: the labels on a chat or a customer. Label titles are written by administrators and returned as
-they are.
+"""Labels, read: the labels on a chat or a customer. Any agent or API client can attach free text as a label, so a
+label without a plain label's shape is framed as untrusted (``shaping.shape_labels``).
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import rows
+from chatwoot_mcp.shaping import shape_labels
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, ContactId, ConversationId, ToolContext
 
@@ -27,7 +28,10 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             labels = current_labels(await session.get(path))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {key: item_id, "labels": labels}
+        return {
+            key: item_id,
+            "labels": shape_labels(labels, source=f"{key.removesuffix('_id')}_label", item_id=item_id),
+        }
 
     @mcp.tool(**context.tool("Get conversation labels", READ, module=MODULE, tier=Tier.AGENT))
     async def get_conversation_labels(conversation_id: ConversationId) -> dict[str, Any] | str:

@@ -7,6 +7,10 @@ Replies and new conversations are in ``replies``, behind the same confirm step.
 - ``toggle_status`` reads ``snoozed_until`` with ``strptime('%s')``: Unix seconds. An ISO string parses as a moment
   in 1970 and the chat wakes at once.
 - Opening a chat assigns it to the key's owner when their role is agent (not administrator).
+- An ``assignee_id`` that is not a user of the account silently unassigns the chat, so the agent is checked against
+  the chat inbox's assignable agents first (the account's agents when the caller cannot read the inbox).
+- ``GET /inboxes/{id}`` needs inbox membership, which agents who reach a chat through its team lack, so resolving
+  falls back to a general survey warning when the inbox cannot be read.
 - Changing the team drops an assignee who is not in it (and may auto-assign a member), so the team is set first.
 - ``POST .../custom_attributes`` replaces the whole set unless ``merge`` is sent, which older versions ignore, so
   the current fields are sent along with the new ones.
@@ -22,7 +26,8 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
-from chatwoot_mcp.client.models import Conversation, CustomAttributeDefinition, Inbox, payload
+from chatwoot_mcp.client.errors import PermissionDenied
+from chatwoot_mcp.client.models import Agent, Conversation, CustomAttributeDefinition, Inbox, payload
 from chatwoot_mcp.shaping import compact, shape_attributes, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
@@ -63,6 +68,15 @@ def snooze_seconds(status: str, snoozed_until: str | None) -> int | None:
     return int(moment.timestamp())
 
 
+async def assignable_agent_ids(session: ChatwootSession, conversation_id: int) -> set[int]:
+    chat = Conversation.parse(await session.get(f"/conversations/{conversation_id}"))
+    try:
+        data = await session.get("/assignable_agents", {"inbox_ids": [chat.inbox_id]})
+    except PermissionDenied:
+        data = await session.get("/agents")
+    return {agent.id for agent in Agent.parse_rows(data)}
+
+
 def register(mcp: FastMCP, context: ToolContext) -> None:
     @mcp.tool(**context.tool("Assign conversation", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def assign_conversation(
@@ -79,6 +93,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         path = f"/conversations/{conversation_id}/assignments"
         try:
             session = await context.session()
+            if agent_id is not None and agent_id not in await assignable_agent_ids(session, conversation_id):
+                return f"Error: agent {agent_id} cannot be assigned to this chat; use list_agents to find a valid id"
             # Team first: changing the team drops an assignee who is not in it, which would undo an agent set before.
             if team_id is not None:
                 await session.post(path, {"team_id": team_id})
@@ -134,10 +150,18 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             chat = Conversation.parse(await session.get(f"/conversations/{conversation_id}"))
             if chat.status == "resolved":
                 return f"Error: conversation {conversation_id} is already resolved"
-            inbox = Inbox.parse(await session.get(f"/inboxes/{chat.inbox_id}")) if chat.inbox_id else None
         except ChatwootError as error:
             return to_tool_error(error)
-        survey = bool(inbox and inbox.csat_survey_enabled)
+        try:
+            inbox = Inbox.parse(await session.get(f"/inboxes/{chat.inbox_id}")) if chat.inbox_id else None
+            survey_warning = (
+                "The customer will be sent a satisfaction survey." if inbox and inbox.csat_survey_enabled else None
+            )
+        except PermissionDenied:
+            inbox = None
+            survey_warning = "The customer may be sent a satisfaction survey, if the inbox has surveys on."
+        except ChatwootError as error:
+            return to_tool_error(error)
         preview = compact(
             {
                 "conversation_id": conversation_id,
@@ -145,7 +169,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
                 "to": "resolved",
                 "customer": shape_person(chat.meta.sender, source="contact"),
                 "inbox": inbox.name if inbox else None,
-                "warning": "The customer will be sent a satisfaction survey." if survey else None,
+                "warning": survey_warning,
                 "url": context.links.conversation(conversation_id),
             }
         )
@@ -202,7 +226,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     async def set_conversation_custom_attributes(
         conversation_id: ConversationId,
         attributes: Annotated[
-            dict[str, str | int | float | bool],
+            dict[str, str | int | Annotated[float, Field(allow_inf_nan=False)] | bool],
             Field(
                 min_length=1,
                 max_length=20,

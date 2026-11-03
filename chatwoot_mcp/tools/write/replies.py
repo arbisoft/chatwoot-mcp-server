@@ -16,7 +16,6 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
-from chatwoot_mcp.client.http import accepted_but_unreadable, never_sent, outcome_unknown
 from chatwoot_mcp.client.models import Conversation, Inbox, Message, Person, payload
 from chatwoot_mcp.shaping import compact, shape_message, shape_person
 from chatwoot_mcp.tiers import Tier
@@ -30,6 +29,7 @@ from chatwoot_mcp.tools.context import (
     as_dict,
     confirmation_refusal,
     prepared,
+    send_failure,
 )
 
 MODULE = "replies"
@@ -38,6 +38,8 @@ CREATE_CONVERSATION = "create_conversation"
 MAX_MESSAGE_CHARS = 5000
 SENT_TO_CUSTOMER = "This message will be sent to the customer and cannot be unsent."
 # Inboxes Chatwoot can start a chat in, and the contact field each one needs (Chatwoot's ContactInboxBuilder).
+# ``None``: only an existing session reaches the customer, since a new one gets a random id no widget or API client
+# holds.
 NEW_CHAT_CONTACT_FIELD: dict[str, str | None] = {
     "Channel::Api": None,
     "Channel::WebWidget": None,
@@ -46,6 +48,8 @@ NEW_CHAT_CONTACT_FIELD: dict[str, str | None] = {
     "Channel::Whatsapp": "phone_number",
     "Channel::TwilioSms": "phone_number",
 }
+# WhatsApp allows a free-form message only within 24 hours of the customer's last message, which a new chat lacks.
+NO_FIRST_MESSAGE_CHANNELS = frozenset({"Channel::Whatsapp"})
 
 InboxId = Annotated[int, Field(ge=1, description="The inbox to start the chat in. See list_inboxes.")]
 Content = Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="The message text.")]
@@ -53,20 +57,6 @@ FirstMessage = Annotated[
     str | None,
     Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="An optional first message to the customer."),
 ]
-
-
-def send_failure(error: ChatwootError, what: str) -> str:
-    """Say whether the message went: surely not, maybe, or yes with an unreadable answer."""
-    if accepted_but_unreadable(error):
-        return f"Error: Chatwoot accepted the {what}, so it was sent, but its answer could not be read; check the chat"
-    if never_sent(error):
-        return f"{to_tool_error(error)}; nothing was sent, prepare it again"
-    if outcome_unknown(error):
-        return (
-            f"{to_tool_error(error)}; the {what} may or may not have been sent. "
-            "Check the chat before preparing it again"
-        )
-    return to_tool_error(error)
 
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
@@ -133,6 +123,14 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     def conversation_payload(contact_id: int, inbox_id: int, message: str | None) -> dict[str, Any]:
         return {"contact_id": contact_id, "inbox_id": inbox_id, "message": message}
 
+    def existing_source_id(contact_data: Any, inbox_id: int) -> str | None:
+        """The contact's session id in this inbox, from ``GET /contacts/{id}`` (which lists its contact_inboxes)."""
+        for row in as_dict(payload(contact_data)).get("contact_inboxes") or []:
+            row = as_dict(row)
+            if as_dict(row.get("inbox")).get("id") == inbox_id and isinstance(row.get("source_id"), str):
+                return row["source_id"]
+        return None
+
     @mcp.tool(**context.tool("Prepare to create conversation", PREPARE, module=MODULE, tier=Tier.AGENT))
     async def prepare_create_conversation(
         contact_id: ContactId, inbox_id: InboxId, message: FirstMessage = None
@@ -155,7 +153,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return to_tool_error(error)
         if inbox.channel_type not in NEW_CHAT_CONTACT_FIELD:
             return f"Error: Chatwoot cannot start a chat in a {inbox.channel_type} inbox; pick another inbox"
+        if message and inbox.channel_type in NO_FIRST_MESSAGE_CHANNELS:
+            return "Error: WhatsApp allows no free-form first message in a new chat; create it without a message"
         needed = NEW_CHAT_CONTACT_FIELD[inbox.channel_type]
+        if needed is None and existing_source_id(contact_data, inbox_id) is None:
+            return "Error: this customer has never written in through this inbox, so a new chat there cannot reach them"
         if needed and not getattr(contact, needed):
             return f"Error: this inbox needs the contact's {needed.replace('_', ' ')}, and the contact has none"
         preview = compact(
@@ -196,10 +198,21 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         if message:
             body["message"] = {"content": message}
         try:
+            source_id = existing_source_id(await session.get(f"/contacts/{contact_id}"), inbox_id)
+        except ChatwootError as error:
+            return f"{to_tool_error(error)}; nothing was created, prepare it again"
+        if source_id is not None:
+            body["source_id"] = source_id
+        try:
             created = as_dict(await session.post("/conversations", body))
         except ChatwootError as error:
             return send_failure(error, "new conversation")
         conversation_id = created.get("id")
+        if message and created.get("can_reply") is False:
+            return (
+                f"Error: chat {conversation_id} was created, but the customer cannot be messaged in this channel right "
+                "now, so the first message was not delivered"
+            )
         return compact(
             {
                 "conversation_id": conversation_id,

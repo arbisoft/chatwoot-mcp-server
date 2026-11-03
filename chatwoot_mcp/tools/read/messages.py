@@ -13,7 +13,7 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Message
-from chatwoot_mcp.shaping import shape_message
+from chatwoot_mcp.shaping import shape_labels, shape_message
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, ConversationId, ToolContext, as_dict, limited
 
@@ -39,7 +39,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return to_tool_error(error)
         out: dict[str, Any] = {
             "conversation_id": conversation_id,
-            "labels": as_dict(as_dict(data).get("meta")).get("labels") or [],
+            "labels": shape_labels(
+                as_dict(as_dict(data).get("meta")).get("labels") or [],
+                source="conversation_label",
+                item_id=conversation_id,
+            ),
             "messages": [shape_message(m, max_chars=context.max_chars) for m in items],
         }
         if cut:

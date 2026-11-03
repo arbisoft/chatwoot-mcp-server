@@ -46,7 +46,7 @@ async def test_filter_turns_conditions_into_chatwoots_query_with_no_join_after_t
         {
             "conditions": [
                 {"field": "assignee_id", "operator": "is_not_present"},
-                {"field": "last_activity_at", "operator": "days_before", "values": [3]},
+                {"field": "last_activity_at", "operator": "days_before", "values": ["3"]},
             ],
             "match": "any",
         },
@@ -57,7 +57,7 @@ async def test_filter_turns_conditions_into_chatwoots_query_with_no_join_after_t
             {
                 "attribute_key": "last_activity_at",
                 "filter_operator": "days_before",
-                "values": [3],
+                "values": ["3"],
                 "query_operator": None,
             },
         ],
@@ -89,7 +89,13 @@ async def test_attachments_list_no_download_links(settings, fake):
 # --- writes ---------------------------------------------------------------------------------------
 
 
+def assignable(fake, *agent_ids):
+    fake.on("GET", "/conversations/12", json={"id": 12, "inbox_id": 3})
+    fake.on("GET", "/assignable_agents", json={"payload": [{"id": i} for i in agent_ids]})
+
+
 async def test_assign_sets_the_team_first_so_the_team_change_cannot_drop_the_agent(settings, fake):
+    assignable(fake, 8)
     fake.on("POST", "/conversations/12/assignments", json={})
     out = await data(settings, fake, "assign_conversation", {"conversation_id": 12, "agent_id": 8, "team_id": 2})
     bodies = [json.loads(r.content) for r in fake.calls("POST", "/conversations/12/assignments")]
@@ -106,9 +112,27 @@ async def test_assign_needs_someone_and_says_when_only_the_team_was_set(settings
 
         return Response(next(answers), json={"message": "Agent is not an inbox member"})
 
+    assignable(fake, 8)
     fake.on("POST", "/conversations/12/assignments", handler=handler)
     out = await data(settings, fake, "assign_conversation", {"conversation_id": 12, "agent_id": 8, "team_id": 2})
     assert out.startswith("Error: the team was assigned, but assigning the agent failed") and "inbox member" in out
+
+
+async def test_an_agent_who_cannot_take_the_chat_is_refused_before_anything_changes(settings, fake):
+    # Chatwoot would silently unassign the chat for an id that is not one of its users.
+    assignable(fake, 8)
+    out = await data(settings, fake, "assign_conversation", {"conversation_id": 12, "agent_id": 9999})
+    assert "cannot be assigned" in out and fake.writes() == []
+    assert fake.calls("GET", "/assignable_agents")[-1].url.params.get_list("inbox_ids[]") == ["3"]
+
+
+async def test_assign_checks_the_account_agents_when_the_inbox_is_not_readable(settings, fake):
+    assignable(fake, 8)
+    fake.on("GET", "/assignable_agents", status=401, json={"error": "You are not authorized to do this action"})
+    fake.on("GET", "/agents", json=[{"id": 9}])
+    fake.on("POST", "/conversations/12/assignments", json={"id": 9})
+    out = await data(settings, fake, "assign_conversation", {"conversation_id": 12, "agent_id": 9})
+    assert out == {"conversation_id": 12, "assigned_agent_id": 9, "assigned_team_id": None}
 
 
 async def test_snoozing_sends_unix_seconds_because_chatwoot_reads_strptime_s(settings, fake):
@@ -192,6 +216,13 @@ async def test_resolving_is_previewed_with_the_survey_warning_then_done_once(set
     assert done.data == {"conversation_id": 12, "status": "resolved"} and "already used" in again.data
     assert fake.last_json("POST", "/conversations/12/toggle_status") == {"status": "resolved"}
     assert len(fake.calls("POST", "/conversations/12/toggle_status")) == 1
+
+
+async def test_a_team_member_who_cannot_read_the_inbox_can_still_resolve(settings, fake):
+    fake.on("GET", "/conversations/12", json=RESOLVABLE)
+    fake.on("GET", "/inboxes/3", status=401, json={"error": "You are not authorized to do this action"})
+    out = await data(settings, fake, "prepare_resolve_conversation", {"conversation_id": 12})
+    assert "may be sent a satisfaction survey" in out["preview"]["warning"] and out["confirmation_token"]
 
 
 async def test_a_resolved_chat_is_not_prepared_again_and_status_cannot_resolve(settings, fake):

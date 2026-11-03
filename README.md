@@ -31,7 +31,6 @@ needs the `[platform]` extra and Chatwoot running with `AUTH_TYPE=SSO`. See [doc
 ## Quick start
 
 ```bash
-cd mcp
 uv sync --all-extras
 CHATWOOT_URL=https://chat.example.com CHATWOOT_ACCOUNT_ID=1 CHATWOOT_HTTP_TOKEN=... uv run chatwoot-mcp stdio
 ```

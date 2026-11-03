@@ -42,22 +42,28 @@ class ConfigError(ValueError):
     """Raised when a required setting is missing or malformed."""
 
 
-# Every boolean gate is read through parse_flag, so they all agree on "true". Values are stripped: a trailing space is
-# routine in Docker .env files and must not silently turn CHATWOOT_READ_ONLY off.
-_TRUTHY = ("true", "1", "yes", "on")
+# Every boolean gate is read through parse_flag, so they all agree. Values are stripped (a trailing space is routine
+# in Docker .env files), and anything else stops the server: a typo must never silently turn CHATWOOT_READ_ONLY off.
+_TRUTHY = frozenset({"true", "1", "yes", "on"})
+_FALSY = frozenset({"false", "0", "no", "off"})
 
 
 def parse_flag(raw: str | None, default: bool = False) -> bool:
-    """``True`` when the stripped, lower-cased value is true, 1, yes or on; ``default`` when unset or blank."""
+    """true/1/yes/on or false/0/no/off, any case; ``default`` when unset or blank; ``ConfigError`` otherwise."""
     value = (raw or "").strip().lower()
     if not value:
         return default
+    if value not in _TRUTHY | _FALSY:
+        raise ConfigError(f"{raw!r} is not a true/false value (use true or false)")
     return value in _TRUTHY
 
 
 def env_flag(name: str, default: bool = False, environ: Mapping[str, str] | None = None) -> bool:
     env = os.environ if environ is None else environ
-    return parse_flag(env.get(name), default)
+    try:
+        return parse_flag(env.get(name), default)
+    except ConfigError as error:
+        raise ConfigError(f"{name}: {error}") from None
 
 
 @dataclass(frozen=True)

@@ -29,18 +29,35 @@ from chatwoot_mcp.tools.context import (
     ToolContext,
     confirmation_refusal,
     prepared,
+    send_failure,
 )
-from chatwoot_mcp.tools.write.replies import send_failure
 
 MODULE = "macros"
 ACTION = "run_macro"
-# Macro steps that reach the customer or leave Chatwoot.
+# Steps known to stay inside Chatwoot. Every other step, including ones Chatwoot adds later, gets a warning.
+INTERNAL_STEPS = frozenset(
+    {
+        "add_label",
+        "remove_label",
+        "assign_agent",
+        "remove_assigned_agent",
+        "assign_team",
+        "remove_assigned_team",
+        "change_priority",
+        "add_private_note",
+        "snooze_conversation",
+        "open_conversation",
+        "pending_conversation",
+    }
+)
 OUTWARD_STEPS = {
     "send_message": "sends a message to the customer",
     "send_attachment": "sends a file to the customer",
     "send_email_transcript": "emails the chat transcript",
     "send_webhook_event": "sends the chat's data to an outside web address",
     "resolve_conversation": "resolves the chat, which may send the customer a satisfaction survey",
+    "mute_conversation": "resolves and mutes the chat, which may send the customer a satisfaction survey",
+    "change_status": "changes the chat's status, which may resolve it and send the customer a satisfaction survey",
 }
 
 MacroId = Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")]
@@ -69,7 +86,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         except ChatwootError as error:
             return to_tool_error(error)
         steps = macro_steps(macro)
-        outward = [OUTWARD_STEPS[action.action_name] for action in macro.actions if action.action_name in OUTWARD_STEPS]
+        outward = [
+            OUTWARD_STEPS.get(action.action_name, f"runs `{action.action_name}`, a step this server does not know")
+            for action in macro.actions
+            if action.action_name not in INTERNAL_STEPS
+        ]
         preview: dict[str, Any] = {
             "conversation_id": conversation_id,
             "contact": shape_person(chat.meta.sender, source="contact"),

@@ -1,9 +1,10 @@
 import httpx
+import pytest
 from fastmcp import Client
 
 from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError, UnexpectedResponseError
 from chatwoot_mcp.server import build_server
-from chatwoot_mcp.tools.write.replies import send_failure
+from chatwoot_mcp.tools.context import send_failure
 from tests.conftest import FakeChatwoot, unframed
 
 CHAT = {"id": 12, "can_reply": True, "meta": {"channel": "Channel::Email", "sender": {"id": 4, "name": "Sam"}}}
@@ -86,16 +87,24 @@ def test_a_failed_send_says_whether_it_went():
     assert "so it was sent" in send_failure(UnexpectedResponseError("unexpected Message shape"), "reply")
 
 
-async def test_a_new_conversation_is_previewed_then_created(everything, fake):
-    fake.on("GET", "/contacts/4", json={"payload": {"id": 4, "name": "Sam"}})
+SAM_IN_API_INBOX = {"payload": {"id": 4, "name": "Sam", "contact_inboxes": [{"source_id": "s-1", "inbox": {"id": 8}}]}}
+
+
+async def test_a_new_conversation_is_previewed_then_created_in_the_customers_session(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
     fake.on("GET", "/inboxes/8", json={"id": 8, "name": "API", "channel_type": "Channel::Api"})
-    fake.on("POST", "/conversations", json={"id": 22, "status": "open", "inbox_id": 8})
+    fake.on("POST", "/conversations", json={"id": 22, "status": "open", "inbox_id": 8, "can_reply": True})
     arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hello"}
     preview, created, _ = await two_steps(
         everything, fake, "prepare_create_conversation", "create_conversation", arguments
     )
     assert preview["preview"]["inbox"]["name"] == "API" and "warning" in preview["preview"]
-    assert fake.last_json("POST", "/conversations") == {"contact_id": 4, "inbox_id": 8, "message": {"content": "Hello"}}
+    assert fake.last_json("POST", "/conversations") == {
+        "contact_id": 4,
+        "inbox_id": 8,
+        "message": {"content": "Hello"},
+        "source_id": "s-1",
+    }
     assert created["conversation_id"] == 22 and created["url"].endswith("/conversations/22")
 
 
@@ -108,7 +117,25 @@ async def test_a_new_conversation_in_an_inbox_chatwoot_cannot_use_gets_no_token(
     )
     fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Email"})
     no_email, _, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
-    assert "cannot start a chat" in unsupported and "contact's email" in no_email and fake.writes() == []
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::WebWidget"})
+    no_session, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", arguments
+    )
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Whatsapp"})
+    whatsapp, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {**arguments, "message": "Hi"}
+    )
+    assert "cannot start a chat" in unsupported and "contact's email" in no_email
+    assert "never written in through this inbox" in no_session and "WhatsApp" in whatsapp and fake.writes() == []
+
+
+async def test_a_first_message_the_channel_cannot_deliver_is_reported(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api"})
+    fake.on("POST", "/conversations", json={"id": 22, "status": "open", "can_reply": False})
+    arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hello"}
+    _, created, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    assert "chat 22 was created" in created and "not delivered" in created
 
 
 async def test_replies_do_not_exist_unless_switched_on_or_when_read_only(settings, read_only, fake):
@@ -165,9 +192,10 @@ async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything
     async with Client(build_server(everything, transport=fake)) as client:
         listed = (await client.call_tool("list_macros", {})).data
     assert listed == {
+        "page": 1,
         "macros": [
             {"id": 7, "name": "Refund", "visibility": "global", "steps": [{"step": "add_label", "with": ["refund"]}]}
-        ]
+        ],
     }
 
 
@@ -196,3 +224,12 @@ async def test_a_macro_edited_after_the_preview_is_refused(everything, fake):
     arguments = {"macro_id": 7, "conversation_id": 12}
     _, done, _ = await two_steps(everything, fake, "prepare_run_macro", "run_macro", arguments)
     assert "steps no longer match" in done and fake.writes() == []
+
+
+@pytest.mark.parametrize("step", ["mute_conversation", "change_status", "some_future_action"])
+async def test_a_step_not_known_to_stay_inside_gets_a_warning(everything, fake, step):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["billing"]}, {"action_name": step}])
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
+    )
+    assert "cannot be undone" in preview["preview"]["warning"]

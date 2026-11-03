@@ -39,19 +39,20 @@ async def test_extract_keeps_identity_and_gates_the_access_token(provider):
     sealed = await provider._extract_upstream_claims(tokens)
     resolved = await provider._extract_upstream_claims(tokens, include_access_token=True)
 
-    assert sealed == {
+    # Nothing is sealed into the JWT a client holds: it is signed, not encrypted.
+    assert sealed is None
+    assert resolved == {
         "id_token": ID_TOKEN,
         "email": "ada@example.com",
         "cognito:username": "sid-1",
         "preferred_username": "sid-1",
+        ACCESS_TOKEN_CLAIM: "upstream",
     }
-    assert ACCESS_TOKEN_CLAIM not in sealed
-    assert resolved[ACCESS_TOKEN_CLAIM] == "upstream"
 
 
 @pytest.mark.parametrize("tokens", [{}, {"id_token": ""}, {"id_token": "not-a-jwt"}])
 async def test_extract_gives_up_without_a_readable_id_token(provider, tokens):
-    assert await provider._extract_upstream_claims(tokens) is None
+    assert await provider._extract_upstream_claims(tokens, include_access_token=True) is None
 
 
 async def test_extract_drops_empty_claims(provider):
@@ -156,5 +157,20 @@ async def test_load_access_token_fails_closed_without_an_id_token(provider, vali
 
 async def test_load_access_token_passes_an_upstream_rejection_through(provider, validated):
     provider.next_validated = None
+    wire(provider)
 
     assert await provider.load_access_token("issued") is None
+
+
+async def test_load_access_token_raises_when_the_store_is_down(provider, validated):
+    # FastMCP's base turns a store error into "no token"; the probe makes the outage a server error, not a 401.
+    class DownStore:
+        async def get(self, key):
+            raise ConnectionError("valkey is down")
+
+    provider.next_validated = None
+    wire(provider)
+    provider._jti_mapping_store = DownStore()
+
+    with pytest.raises(ConnectionError):
+        await provider.load_access_token("issued")

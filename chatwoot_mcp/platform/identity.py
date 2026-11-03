@@ -1,7 +1,8 @@
 """Who the caller is, read from the token :mod:`chatwoot_mcp.platform.cognito` validated.
 
-The identity is the id_token's ``email`` when it looks like one, else
-``cognito:username``. It is lowercased, as Chatwoot's Mpass::ProxyIdentity does, and
+The identity is the id_token's ``email`` when it looks like one and is trustworthy (Cognito marked it
+``email_verified``, or mpass-auth-proxy's overlay wrote it), else ``cognito:username``, which is what the web
+login keys on. It is lowercased, as Chatwoot's Mpass::ProxyIdentity does, and
 is the ``X-Auth-Request-Email`` the mint bootstraps with. Caches and locks
 key on ``sha256(identity)``, never the identity itself.
 """
@@ -20,6 +21,7 @@ from chatwoot_mcp.platform.cognito import (
     ACCESS_TOKEN_CLAIM,
     COGNITO_USERNAME_CLAIM,
     EMAIL_CLAIM,
+    EMAIL_VERIFIED_CLAIM,
     ID_TOKEN_KEY,
     PREFERRED_USERNAME_CLAIM,
     UPSTREAM_CLAIMS_KEY,
@@ -53,10 +55,13 @@ def identity_email_for(claims: Mapping[str, Any] | None) -> str | None:
     upstream = _upstream(claims)
     if upstream is None:
         return None
+    username = _non_empty(upstream.get(COGNITO_USERNAME_CLAIM))
     email = _non_empty(upstream.get(EMAIL_CLAIM))
-    if email and "@" in email:
+    # The overlay stamps preferred_username with the caller's own cognito:username when it writes `email`.
+    overlaid = username is not None and _non_empty(upstream.get(PREFERRED_USERNAME_CLAIM)) == username
+    if email and "@" in email and (upstream.get(EMAIL_VERIFIED_CLAIM) is True or overlaid):
         return email
-    return _non_empty(upstream.get(COGNITO_USERNAME_CLAIM))
+    return username
 
 
 def upstream_access_token_for(claims: Mapping[str, Any] | None) -> str | None:

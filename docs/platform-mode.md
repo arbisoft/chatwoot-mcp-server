@@ -53,7 +53,9 @@ Chatwoot. On a user's first call, or when their cached key needs checking, it op
 The key is never reset or revoked: it is the same key the user may use elsewhere, and resetting it would break
 those.
 
-The identity is the id_token's `email` (lowercased), or `cognito:username` when there is no email. An unverified
+The identity is the id_token's `email` (lowercased) when Cognito marks it `email_verified` or mpass-auth-proxy's
+overlay wrote it (`preferred_username == cognito:username`); otherwise it is `cognito:username`, which is what the web
+login (oauth2-proxy's `user-id-claim`) keys on. An email a user could set themselves is never trusted. An unverified
 platform user carries exactly `<cognito:username>@<DEFAULT_EMAIL_DOMAIN>`, and Chatwoot's `Mpass::ProxyIdentity`
 turns a value without `@` into `<value>@DEFAULT_EMAIL_DOMAIN`.
 
@@ -71,12 +73,21 @@ read:
 ## Cache, re-checks and role changes
 
 - The key is cached under `chatwoot-mcp:key:v1:<namespace>:<sha256(identity)>` for a week, Fernet-encrypted with a key
-  derived from `OIDC_CLIENT_SECRET` (or `MCP_JWT_SIGNING_KEY`). The namespace is a short hash of `OIDC_CLIENT_ID`,
+  derived from `OIDC_CLIENT_SECRET` (or from `MCP_JWT_SIGNING_KEY`, first stretched with PBKDF2 like FastMCP does,
+  since an operator types it). The namespace is a short hash of `OIDC_CLIENT_ID`,
   `CHATWOOT_INTERNAL_BASE_URL` and `CHATWOOT_ACCOUNT_ID`, so two deployments sharing one Valkey database never read
-  each other's keys or confirmations. The value
-  holds the key, the account permissions, the tier and when it was last checked.
-- Every four hours the whole handoff runs again, so a user removed from the corporate ID or from the account loses
-  access within four hours, and a role change is picked up. A key on its own does not pass the corporate gate.
+  each other's keys or confirmations. The value holds the key, the account permissions, the tier and when it was
+  last checked.
+- Every four hours the whole handoff runs again, so a user removed from the corporate ID loses access within four
+  hours, and a role change is picked up. A key on its own does not pass the corporate gate.
+- Removing a user from the Chatwoot account does **not** revoke access: the fork's SSO handoff re-joins any user with
+  no memberships as an agent, for the web login and this server alike. Revoke access in mPass or the corporate gate.
+- A refused user (corporate gate, or no membership) is remembered for five minutes, so they do not re-run the
+  handoff, and its database writes, on every call.
+- Every fetch signs in at `POST /auth/sign_in` from this server's one address, and Chatwoot's Rack::Attack allows
+  five per five minutes per IP. **Add the server's address to Chatwoot's `RACK_ATTACK_ALLOWED_IPS`** (exact IPs, so
+  give the container a fixed address; `devkit/` shows how). Without it, a re-check that is throttled keeps the
+  cached key, but a first fetch fails until the window passes.
 - A role refusal from Chatwoot (a `403`, or its `401 You are not authorized to do this action`) sets a "due" flag,
   behind a `SET NX EX` limiter (at most once per five minutes per identity); the next call re-checks.
 - A `401` with a rejected key (the user reset it) drops the cache entry, fetches once and retries the request once.
@@ -84,8 +95,9 @@ read:
 - Any cache or fetch error fails the request with an `Error: ...` message. Nothing falls back to another key. The one
   exception is an entry that no longer decrypts (a rotated secret): it is treated as absent and fetched again.
 - Every decision writes one JSON line on the `chatwoot_mcp.audit` logger: `key.fetched` (with the reason),
-  `key.recheck_unchanged`, `key.recheck_requested`, `key.renew_reused`, `key.denied` and `key.refused`. Each carries
-  the identity hash and, where there is a key, its tier and permissions. Never the key or the email.
+  `key.recheck_unchanged`, `key.recheck_requested`, `key.recheck_deferred`, `key.renew_reused`, `key.denied` and
+  `key.refused`. Each carries the identity hash and, where there is a key, its tier and permissions. Never the key
+  or the email.
 
 ## Tool visibility
 
@@ -108,6 +120,7 @@ database holds:
 | `chatwoot-mcp:key:v1:<namespace>:*` | Cached keys, Fernet-encrypted |
 | `chatwoot-mcp:recheck-limit:v1:<namespace>:*` | Re-check limiter, 5-minute TTL |
 | `chatwoot-mcp:recheck-due:v1:<namespace>:*` | Re-check flags, cleared by the next re-check |
+| `chatwoot-mcp:denied:v1:<namespace>:*` | Refusals, 5-minute TTL |
 | `chatwoot-mcp:confirm:v1:*` | Two-step confirmations, Fernet-encrypted |
 
 Without `MCP_OAUTH_STORAGE_URL` everything lives in process: it is lost on restart and not shared between replicas.

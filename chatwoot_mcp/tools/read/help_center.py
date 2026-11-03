@@ -41,6 +41,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
                     {
                         **article.model_dump(include=set(Article.model_fields) - {"content"}),
                         "content": (article.content or "")[: context.max_chars],
+                        "truncated": len(article.content or "") > context.max_chars or None,
                     }
                 )
                 for article in items

@@ -20,8 +20,19 @@ def claims(**upstream) -> dict:
     return {UPSTREAM_CLAIMS_KEY: {"id_token": "id", **upstream}}
 
 
-def test_identity_prefers_an_email_shaped_email():
-    assert identity_email_for(claims(email="ada@example.com", **{"cognito:username": "sid"})) == "ada@example.com"
+def test_identity_prefers_a_verified_or_overlaid_email():
+    verified = claims(email="ada@example.com", email_verified=True, **{"cognito:username": "sid"})
+    overlaid = claims(email="ada@example.com", preferred_username="sid", **{"cognito:username": "sid"})
+    assert identity_email_for(verified) == identity_email_for(overlaid) == "ada@example.com"
+
+
+def test_an_unverified_email_is_never_trusted():
+    # A user who can write their own email attribute must not be able to claim someone else's Chatwoot user.
+    assert identity_email_for(claims(email="boss@example.com", **{"cognito:username": "sid"})) == "sid"
+    assert (
+        identity_email_for(claims(email="boss@example.com", email_verified="true", **{"cognito:username": "sid"}))
+        == "sid"
+    )
 
 
 def test_identity_falls_back_to_the_cognito_username():
@@ -45,7 +56,10 @@ def test_upstream_access_token_is_read_from_the_claims():
 
 def test_identity_for_lowercases_like_the_middleware():
     token = AccessToken(
-        token="t", client_id="c", scopes=[], claims=claims(email="Ada@Example.COM", access_token="secret-upstream")
+        token="t",
+        client_id="c",
+        scopes=[],
+        claims=claims(email="Ada@Example.COM", email_verified=True, access_token="secret-upstream"),
     )
 
     found = identity_for(token)

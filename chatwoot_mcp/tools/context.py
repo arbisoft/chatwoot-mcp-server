@@ -16,7 +16,8 @@ from fastmcp.server.auth import AuthCheck
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from chatwoot_mcp.client import ChatwootClient
+from chatwoot_mcp.client import ChatwootClient, ChatwootError, to_tool_error
+from chatwoot_mcp.client.http import accepted_but_unreadable, never_sent, outcome_unknown
 from chatwoot_mcp.config import Settings
 from chatwoot_mcp.confirmations import ConfirmationError, Confirmations
 from chatwoot_mcp.credentials import ChatwootCredential, CredentialProvider
@@ -66,6 +67,19 @@ class ChatwootSession:
 
 def as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def send_failure(error: ChatwootError, what: str, *, done: str = "sent") -> str:
+    """After a failed write that is never retried: say whether it happened (surely not, maybe, or yes)."""
+    if accepted_but_unreadable(error):
+        return (
+            f"Error: Chatwoot accepted the {what}, so it was {done}, but its answer could not be read; check the chat"
+        )
+    if never_sent(error):
+        return f"{to_tool_error(error)}; nothing was {done}, try again"
+    if outcome_unknown(error):
+        return f"{to_tool_error(error)}; the {what} may or may not have been {done}. Check the chat before trying again"
+    return to_tool_error(error)
 
 
 def limited(items: list[Any], maximum: int) -> tuple[list[Any], bool]:

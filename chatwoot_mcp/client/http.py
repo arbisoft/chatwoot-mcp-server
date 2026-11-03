@@ -39,6 +39,7 @@ from chatwoot_mcp.client.errors import (
     InvalidTokenError,
     MissingTokenError,
     PermissionDenied,
+    RenewalError,
     ServerError,
     UnexpectedResponseError,
     error_detail,
@@ -112,7 +113,9 @@ async def reject_identity_headers(request: httpx.Request) -> None:
 
 
 def never_sent(error: ChatwootError) -> bool:
-    """The request provably never left the process, so Chatwoot did nothing."""
+    """The request provably never left the process, or Chatwoot rejected the key, so Chatwoot did nothing."""
+    if isinstance(error, RenewalError):
+        return True
     return isinstance(error, ChatwootTransportError) and isinstance(error.__cause__, PRE_SEND_ERRORS)
 
 
@@ -221,7 +224,10 @@ class ChatwootClient:
         try:
             return await self._attempt(method, path, token=token, **options)
         except (AuthError, PermissionDenied) as error:
-            replacement = await self._on_rejected(error, token) if self._on_rejected and token else None
+            try:
+                replacement = await self._on_rejected(error, token) if self._on_rejected and token else None
+            except ChatwootError as renewal:
+                raise RenewalError(renewal) from renewal
             if not replacement or replacement == token:
                 raise
         return await self._attempt(method, path, token=replacement, **options)
@@ -249,8 +255,12 @@ class ChatwootClient:
             request = client.build_request(method, path, params=query(params), json=json, headers={TOKEN_HEADER: token})
             try:
                 response = await client.send(request)
-            except httpx.TransportError as exc:
-                if attempt < self._retry.max_retries and _retryable_transport_error(exc, safe):
+            except (httpx.TransportError, httpx.DecodingError) as exc:
+                if (
+                    isinstance(exc, httpx.TransportError)
+                    and attempt < self._retry.max_retries
+                    and _retryable_transport_error(exc, safe)
+                ):
                     await self._sleep(self._retry.backoff(attempt, self._rng))
                     attempt += 1
                     continue

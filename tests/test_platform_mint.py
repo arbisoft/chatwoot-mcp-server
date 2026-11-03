@@ -122,7 +122,7 @@ async def test_the_corporate_gate_refuses_and_drops_the_cache(store, clock):
         await minter.token_for(ADA)
     with pytest.raises(HandoffDeniedError):
         await minter.token_for(ADA)
-    assert chatwoot.handoff_count() == 3, "a denied user is never served from the cache"
+    assert chatwoot.handoff_count() == 2, "a denied user is refused from the denial marker, not the key cache"
 
 
 async def test_sso_mode_off_and_a_handoff_without_a_token_fail_closed(store, clock):
@@ -209,3 +209,16 @@ async def test_a_profile_that_is_not_json_is_a_plain_error_not_a_crash(store, cl
     with pytest.raises(UnexpectedResponseError, match="not JSON"):
         await minter_for(chatwoot, store, clock).token_for(ADA)
     chatwoot._profile = original
+
+
+async def test_a_rate_limited_recheck_keeps_the_working_key(store, clock):
+    # Chatwoot throttles /auth/sign_in per IP, and every fetch comes from this server's one address.
+    chatwoot = FakeSsoChatwoot()
+    chatwoot.add("ada@example.com")
+    minter = minter_for(chatwoot, store, clock)
+    first = await minter.token_for(ADA)
+    chatwoot.throttle_sign_in = True
+    clock.now += RECHECK_INTERVAL_SECONDS
+    assert (await minter.token_for(ADA)).token == first.token
+    chatwoot.throttle_sign_in = False
+    assert (await minter.token_for(ADA)).checked_at == clock.now

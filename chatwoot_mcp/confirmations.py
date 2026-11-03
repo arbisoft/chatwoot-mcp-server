@@ -152,10 +152,17 @@ class Confirmations:
         return {key: expiry for key, expiry in self._outstanding.get(identity, {}).items() if expiry > now}
 
     async def _reserve(self, identity: str, key: str, expires_at: float) -> None:
+        """Count this caller's live tokens and hold one more. The cap is per replica.
+
+        At the cap, tokens another replica already spent are dropped first. The count and the hold run with no await
+        between them, so concurrent calls in one process cannot both pass the check.
+        """
+        held = self._live(identity)
+        if len(held) >= self._max_outstanding:
+            spent = {token for token in held if not await self._backend.exists(token)}
+            if spent:
+                self._release_all(identity, spent)
         live = self._live(identity)
-        if len(live) >= self._max_outstanding:
-            # Another replica may have spent some of these: count only the ones still in the shared store.
-            live = {held: expiry for held, expiry in live.items() if await self._backend.exists(held)}
         if len(live) >= self._max_outstanding:
             raise ConfirmationLimitError(
                 f"you already have {len(live)} actions waiting for confirmation; confirm them or let them expire "
@@ -168,6 +175,10 @@ class Confirmations:
             if other != identity and any(expiry > now for expiry in holds.values())
         }
         self._outstanding = {**others, identity: {**live, key: expires_at}}
+
+    def _release_all(self, identity: str, keys: set[str]) -> None:
+        for key in keys:
+            self._release(identity, key)
 
     def _release(self, identity: str, key: str) -> None:
         remaining = {other: expiry for other, expiry in self._live(identity).items() if other != key}
