@@ -5,7 +5,15 @@ from starlette.testclient import TestClient
 
 from chatwoot_mcp import __main__ as cli
 from chatwoot_mcp.config import ConfigError
-from chatwoot_mcp.server import build_http_app, build_server
+from chatwoot_mcp.server import (
+    MAX_ARGUMENT_CHARS,
+    MAX_BODY_BYTES,
+    MAX_ID,
+    BodyLimit,
+    argument_problem,
+    build_http_app,
+    build_server,
+)
 from tests.conftest import FakeChatwoot, rpc, tool_names, tool_text
 
 API_KEY_PATH = "/http/api-key/mcp"
@@ -101,3 +109,60 @@ def test_request_urls_are_not_logged(monkeypatch):
     monkeypatch.setattr("os.environ", {"MCP_LOG_LEVEL": "debug"})
     cli.configure_logging()
     assert logging.getLogger("httpx").level == logging.WARNING
+
+
+@pytest.mark.parametrize(
+    ("value", "problem"),
+    [
+        ("hi\x00there", "content contains control characters"),
+        ("ring\x07", "content contains control characters"),
+        ("x" * (MAX_ARGUMENT_CHARS + 1), "content is longer than"),
+        (MAX_ID + 1, "content is out of range"),
+        ({"order\x1b": "1"}, "a key in content contains control characters"),
+        (["ok", "bad\x7f"], "content[1] contains control characters"),
+    ],
+)
+def test_the_argument_boundary_refuses_what_no_tool_should_receive(value, problem):
+    assert problem in argument_problem(value, "content")
+
+
+@pytest.mark.parametrize("value", ["line one\nline two\r\n\tindented", "Thanks 👨‍👩‍👧 مرحبا", MAX_ID, True, None, 1.5])
+def test_the_argument_boundary_lets_ordinary_text_and_numbers_through(value):
+    assert argument_problem(value, "content") is None
+
+
+async def test_a_refused_argument_never_reaches_chatwoot(settings, fake):
+    from fastmcp import Client
+
+    async with Client(build_server(settings, transport=fake)) as client:
+        result = await client.call_tool(
+            "add_private_note", {"conversation_id": 12, "content": "pay here\x00"}, raise_on_error=False
+        )
+    assert result.is_error and "control characters" in result.content[0].text
+    assert fake.writes() == []
+
+
+def test_an_oversized_request_body_is_refused_before_it_is_read(api_key_settings, fake):
+    with TestClient(app_for(api_key_settings, fake)) as client:
+        big = client.post(
+            API_KEY_PATH, content=b"x" * (MAX_BODY_BYTES + 1), headers={"Content-Type": "application/json"}
+        )
+        bad_length = client.post(API_KEY_PATH, content=b"{}", headers={"Content-Length": "abc"})
+    assert big.status_code == 413 and bad_length.status_code == 413
+    assert fake.requests == []
+
+
+async def test_a_chunked_body_that_grows_past_the_limit_reads_as_a_disconnect():
+    chunks = iter(
+        [{"type": "http.request", "body": b"x" * 6, "more_body": True}, {"type": "http.request", "body": b"x" * 6}]
+    )
+    seen = []
+
+    async def app(_scope, receive, _send):
+        seen.extend([(await receive())["type"], (await receive())["type"]])
+
+    async def receive():
+        return next(chunks)
+
+    await BodyLimit(app, max_bytes=10)({"type": "http", "headers": []}, receive, None)
+    assert seen == ["http.request", "http.disconnect"]

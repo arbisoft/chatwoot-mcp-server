@@ -116,6 +116,14 @@ services:
       context: ../chatwoot-mcp
     image: mpass-sso-devkit/chatwoot-mcp:dev
     restart: unless-stopped
+    # Least privilege: nothing to write, no Linux capabilities, no privilege escalation.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - chatwoot
     environment:

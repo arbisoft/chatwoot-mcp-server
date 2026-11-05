@@ -26,6 +26,30 @@ it is fixed. Please give us a reasonable time to release a fix before disclosing
   The server reads the text to tell them apart, so a role refusal never triggers a key re-fetch.
 - **Personal keys never expire and cannot be narrowed.** A key works with the user's full role until they reset it.
 
+## Trust boundaries
+
+Everything that crosses into the server is checked where it enters; nothing downstream re-checks it.
+
+| Boundary | Trusted? | What happens there |
+|---|---|---|
+| MCP client to server (tool arguments) | No | One middleware refuses control characters, strings over 10,000 characters and integers outside Chatwoot's 32-bit ids for every tool; each tool's schema then checks its own types, ranges, lengths and enums. HTTP bodies over 1 MiB are refused before they are read. |
+| MCP client to server (headers) | No | `X-Auth-Request-*` headers are stripped on `/http/api-key`, and the Chatwoot client refuses to send any. Platform mode trusts only a FastMCP-verified bearer. |
+| Chatwoot answers | Partly | Parsed into tolerant models; any text a customer, visitor or user can write is wrapped in `<untrusted_content>` before the model sees it. |
+| Cognito / mpass-auth-proxy | Yes, over the server's own call | The id_token comes from the token endpoint, never from the MCP client; `email` is trusted only when verified or written by the overlay. |
+| Valkey | Not with secrets | Keys, OAuth state and confirmations are Fernet-encrypted, so a reader of Valkey cannot use or forge them; the plain re-check and refusal markers hold no secrets. |
+| Environment | Yes | Every setting is validated at start-up; a typo stops the server. |
+
+## Least privilege
+
+- **Each call uses the caller's own Chatwoot key**, so the server can never do more than that user can; there is no
+  shared admin key. The OAuth scope requested from Cognito is `openid` only.
+- **Tools follow the role:** report tools are hidden from agents, and `CHATWOOT_READ_ONLY=true` registers no write
+  tool at all. Replies and macros are off unless switched on.
+- **The container** runs as an unprivileged user, cannot rewrite its own code (owned by root), and needs no shell
+  tools. Run it with `read_only: true`, `cap_drop: [ALL]` and `no-new-privileges` (as `devkit/` does). Platform mode
+  then needs `MCP_OAUTH_STORAGE_URL`, since without Valkey FastMCP keeps its OAuth state in files.
+- **CORS** allows only the methods and headers the MCP transport uses, and no cookies.
+
 ## Deployment notes
 
 - **The shared-key route acts as the key's owner.** `/mcp` is only served in http mode when

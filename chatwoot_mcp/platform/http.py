@@ -59,7 +59,7 @@ from chatwoot_mcp.platform.storage import (
     fernet_for,
     parse_storage_url,
 )
-from chatwoot_mcp.server import MCP_PATH, build_server, healthz
+from chatwoot_mcp.server import MCP_PATH, BodyLimit, build_server, healthz
 
 if TYPE_CHECKING:
     from key_value.aio.protocols.key_value import AsyncKeyValue
@@ -228,13 +228,16 @@ def build_platform_app(
         ],
         lifespan=lifespan,
     )
+    # Only what the streamable HTTP transport uses; no cookies, since callers send bearer tokens.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(platform.cors_origins),
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id", "Mcp-Protocol-Version", "Last-Event-ID"],
+        expose_headers=["Mcp-Session-Id"],
     )
+    app.add_middleware(BodyLimit)
     return app
 
 
