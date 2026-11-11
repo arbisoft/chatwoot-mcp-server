@@ -1,6 +1,7 @@
 import httpx
 import pytest
 from fastmcp import Client
+from fastmcp.client.elicitation import ElicitResult
 
 from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError, UnexpectedResponseError
 from chatwoot_mcp.server import build_server
@@ -254,3 +255,27 @@ async def test_an_inbox_with_one_chat_per_customer_points_to_the_existing_chat(e
         everything, fake, "prepare_create_conversation", "create_conversation", {"contact_id": 4, "inbox_id": 8}
     )
     assert "reuse chat 31" in preview and fake.writes() == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "sent"),
+    [("approve", True), ("cancel", False), (ElicitResult(action="decline"), False), (RuntimeError("closed"), False)],
+    ids=["approved", "cancelled", "declined", "prompt-failed"],
+)
+async def test_a_client_that_can_prompt_asks_the_person_before_anything_is_sent(everything, fake, answer, sent):
+    # The model holds the token, so where the client can show a prompt the person approves, not the model.
+    reply_routes(fake)
+    prompts = []
+
+    async def handler(message, response_type, params, context):
+        prompts.append(message)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer if isinstance(answer, ElicitResult) else {"value": answer}
+
+    async with Client(build_server(everything, transport=fake), elicitation_handler=handler) as client:
+        token = (await client.call_tool("prepare_send_reply", REPLY)).data["confirmation_token"]
+        done = (await client.call_tool("send_reply", {**REPLY, "confirmation_token": token})).data
+    assert len(prompts) == 1 and "send reply" in prompts[0] and "Hi Sam" in prompts[0]
+    assert bool(fake.calls("POST", "/conversations/12/messages")) is sent
+    assert (done.get("id") == 70) if sent else ("did not approve" in done)

@@ -64,6 +64,7 @@ def test_settings_read_the_platform_env():
             "MCP_ENV": "Production",
             "MCP_OAUTH_STORAGE_URL": "redis://valkey:6379/3",
             "LAUNCHPAD_EMAIL_CAPTURE": "true",
+            "COGNITO_UPSTREAM_TOKEN_URL": "http://mpass-auth-proxy:8000/token",
         }
     )
 
@@ -71,13 +72,15 @@ def test_settings_read_the_platform_env():
     assert settings.internal_url == "http://chatwoot-web:3000"
     assert settings.default_email_domain == "askii.ai"
     assert settings.scopes == ("openid", "email", "profile")
-    assert settings.redirect_allowlist == [*DEFAULT_REDIRECT_URIS, "https://claude.ai/api/mcp/auth_callback"]
+    assert settings.redirect_allowlist == list(DEFAULT_REDIRECT_URIS)
     assert settings.access_token_ttl_seconds == 3600
     assert settings.log_level == "DEBUG"
     assert settings.cors_origins == ("https://a.test", "https://b.test")
     assert settings.production is True
     assert settings.http_api_key_route is False
     assert settings.email_capture is True
+    # mpass-auth-proxy re-signs the id_token when it captures emails, so its keys are the ones to trust.
+    assert settings.jwks_url == "http://mpass-auth-proxy:8000/.well-known/jwks.json"
     assert settings.key_material == "cognito-app-secret"
     assert "cognito-app-secret" not in repr(settings)
 
@@ -86,7 +89,7 @@ def test_settings_defaults():
     settings = PlatformSettings.from_env({**ENV, "OIDC_CLIENT_SECRET": "", "MCP_JWT_SIGNING_KEY": "k"})
 
     assert settings.scopes == ("openid",)
-    assert settings.redirect_allowlist == [*DEFAULT_REDIRECT_URIS, "https://claude.ai/api/mcp/auth_callback"]
+    assert settings.redirect_allowlist == list(DEFAULT_REDIRECT_URIS)
     assert settings.access_token_ttl_seconds == DEFAULT_ACCESS_TOKEN_TTL_SECONDS
     assert settings.cors_origins == ("*",)
     assert settings.log_level == "INFO"
@@ -131,6 +134,8 @@ def test_settings_read_the_api_key_route_flag(raw, expected):
         ({"MCP_BASE_URL": "chat-mcp.example.test"}, "MCP_BASE_URL must be an http"),
         ({"COGNITO_UPSTREAM_TOKEN_URL": "mpass-auth-proxy:8000/token"}, "COGNITO_UPSTREAM_TOKEN_URL"),
         ({"MCP_ENV": "production"}, "needs MCP_OAUTH_STORAGE_URL"),
+        ({"LAUNCHPAD_EMAIL_CAPTURE": "true"}, "re-signs the id_token"),
+        ({"MCP_ID_TOKEN_JWKS_URL": "auth/jwks"}, "MCP_ID_TOKEN_JWKS_URL must be an http"),
     ],
 )
 def test_settings_refuse_an_unsafe_or_incomplete_env(overrides, message):
@@ -444,3 +449,11 @@ def test_a_bad_log_level_stops_community_mode_at_start_up(monkeypatch):
 def test_a_flag_typo_stops_start_up(raw):
     with pytest.raises(ConfigError, match="CHATWOOT_HTTP_API_KEY_ROUTE"):
         PlatformSettings.from_env({**ENV, "CHATWOOT_HTTP_API_KEY_ROUTE": raw})
+
+
+def test_id_token_keys_and_cors_defaults_follow_the_deployment():
+    plain = PlatformSettings.from_env(ENV)
+    production = PlatformSettings.from_env({**ENV, "MCP_ENV": "production", "MCP_OAUTH_STORAGE_URL": "redis://v/3"})
+    # Capture off: the id_token is Cognito's own, so Cognito's keys (over HTTPS) are the trust anchor.
+    assert plain.jwks_url.startswith("https://cognito-idp.") and plain.jwks_url.endswith("/.well-known/jwks.json")
+    assert plain.cors_origins == ("*",) and production.cors_origins == ()

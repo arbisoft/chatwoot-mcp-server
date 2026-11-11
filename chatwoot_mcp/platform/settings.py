@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
+from urllib.parse import urlsplit
 
 from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 
@@ -30,18 +31,18 @@ DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
 REFRESH_TOKEN_FALLBACK_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_SCOPES = ("openid",)
 SIGNING_KEY_STRETCH_SALT = "chatwoot-mcp-signing-key"
-# The MCP clients people use, as in Pressingly/plane-mcp-server. MCP_ALLOWED_CLIENT_REDIRECT_URIS adds to these, so
-# onboarding a new client (Askii, say) is a config change, not a release.
+# The MCP clients people use, as in Pressingly/plane-mcp-server, each narrowed to its callback path where it is known
+# (a whole-site pattern would accept any page that redirects onward). MCP_ALLOWED_CLIENT_REDIRECT_URIS adds to these,
+# so onboarding a new client (Askii, say) is a config change, not a release.
 DEFAULT_REDIRECT_URIS = (
     "http://localhost:*",
     "http://localhost:*/*",
     "http://127.0.0.1:*",
     "http://127.0.0.1:*/*",
     "cursor://anysphere.cursor-mcp/oauth/*",
-    "https://www.cursor.com/*",
     "https://vscode.dev/redirect",
     "https://insiders.vscode.dev/redirect",
-    "https://claude.ai/*",
+    "https://claude.ai/api/mcp/auth_callback",
     "https://chatgpt.com/connector/oauth/*",
     "https://chatgpt.com/connector_platform_oauth_redirect",
     "https://oauth-redirect.googleusercontent.com/r/*",
@@ -87,6 +88,17 @@ class PlatformSettings:
     production: bool = False
     http_api_key_route: bool = False
     email_capture: bool = False
+    id_token_jwks_url: str = ""
+
+    @property
+    def jwks_url(self) -> str:
+        """Where the id_token's signing keys are: mpass-auth-proxy's when it re-signs (capture on), else Cognito's."""
+        if self.id_token_jwks_url:
+            return self.id_token_jwks_url
+        if self.email_capture:
+            origin = urlsplit(self.upstream_token_url)
+            return f"{origin.scheme}://{origin.netloc}/.well-known/jwks.json"
+        return f"https://cognito-idp.{self.aws_region}.amazonaws.com/{self.user_pool_id}/.well-known/jwks.json"
 
     @cached_property
     def key_material(self) -> str:
@@ -139,6 +151,15 @@ class PlatformSettings:
             value = read_setting(env, name)
             if value and not URL_PATTERN.fullmatch(value):
                 raise ConfigError(f"{name} must be an http:// or https:// address, got {value!r}")
+        email_capture = env_flag("LAUNCHPAD_EMAIL_CAPTURE", environ=env)
+        jwks_url = read_setting(env, "MCP_ID_TOKEN_JWKS_URL")
+        if jwks_url and not URL_PATTERN.fullmatch(jwks_url):
+            raise ConfigError(f"MCP_ID_TOKEN_JWKS_URL must be an http:// or https:// address, got {jwks_url!r}")
+        if email_capture and not (jwks_url or read_setting(env, "COGNITO_UPSTREAM_TOKEN_URL")):
+            raise ConfigError(
+                "LAUNCHPAD_EMAIL_CAPTURE=true means mpass-auth-proxy re-signs the id_token: set "
+                "COGNITO_UPSTREAM_TOKEN_URL (its JWKS is read from the same host) or MCP_ID_TOKEN_JWKS_URL"
+            )
         production = read_setting(env, "MCP_ENV").lower() == "production"
         if production and not read_setting(env, "MCP_OAUTH_STORAGE_URL"):
             raise ConfigError(
@@ -163,11 +184,13 @@ class PlatformSettings:
             ),
             upstream_auth_url=read_setting(env, "COGNITO_UPSTREAM_AUTH_URL"),
             upstream_token_url=read_setting(env, "COGNITO_UPSTREAM_TOKEN_URL"),
-            cors_origins=_split(read_setting(env, "MCP_ALLOWED_ORIGINS")) or ("*",),
+            # Browsers only; MCP clients call server to server. Production allows no origin unless one is named.
+            cors_origins=_split(read_setting(env, "MCP_ALLOWED_ORIGINS")) or (() if production else ("*",)),
             log_level=log_level,
             production=production,
             http_api_key_route=env_flag("CHATWOOT_HTTP_API_KEY_ROUTE", environ=env),
-            email_capture=env_flag("LAUNCHPAD_EMAIL_CAPTURE", environ=env),
+            email_capture=email_capture,
+            id_token_jwks_url=jwks_url,
         )
 
 

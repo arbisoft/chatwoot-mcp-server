@@ -5,7 +5,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from chatwoot_mcp.tools.read.reports import day_range
-from tests.conftest import REPORTS, FakeChatwoot, data, profile
+from tests.conftest import REPORTS, FakeChatwoot, data, profile, unframed
 
 
 async def test_get_me_returns_an_allow_list_and_never_a_token(settings, fake):
@@ -104,7 +104,11 @@ async def test_help_articles_show_status_and_are_cut(settings, fake):
     out = await data(
         dataclasses.replace(settings, max_text_chars=10), fake, "search_help_articles", {"query": "refund"}
     )
-    assert out["articles"] == [{"id": 2, "title": "Refunds", "status": "draft", "content": "x" * 10, "truncated": True}]
+    assert unframed(out["articles"]) == [
+        {"id": 2, "title": "Refunds", "status": "draft", "content": "x" * 10, "truncated": True}
+    ]
+    # Enterprise custom roles with knowledge_base_manage can write articles, so their text is untrusted.
+    assert out["articles"][0]["content"].startswith("<untrusted_content")
 
 
 # --- reports ------------------------------------------------------------------------------------

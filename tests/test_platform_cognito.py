@@ -8,15 +8,18 @@ from fastmcp.server.auth import AccessToken
 from fastmcp.server.auth.providers.aws import AWSCognitoProvider
 
 from chatwoot_mcp.platform.cognito import ACCESS_TOKEN_CLAIM, UPSTREAM_CLAIMS_KEY, ChatwootCognitoProvider
+from tests.conftest import id_token_verifier, signed_id_token
 
-ID_TOKEN = jwt.encode(
-    {"email": "ada@example.com", "cognito:username": "sid-1", "preferred_username": "sid-1"}, "k" * 32
+ID_TOKEN = signed_id_token(
+    {"sub": "uuid-1", "email": "ada@example.com", "cognito:username": "sid-1", "preferred_username": "sid-1"}
 )
 
 
 @pytest.fixture
 def provider() -> ChatwootCognitoProvider:
-    return object.__new__(ChatwootCognitoProvider)
+    provider = object.__new__(ChatwootCognitoProvider)
+    provider.id_tokens = id_token_verifier()
+    return provider
 
 
 class Store:
@@ -43,6 +46,7 @@ async def test_extract_keeps_identity_and_gates_the_access_token(provider):
     assert sealed is None
     assert resolved == {
         "id_token": ID_TOKEN,
+        "sub": "uuid-1",
         "email": "ada@example.com",
         "cognito:username": "sid-1",
         "preferred_username": "sid-1",
@@ -56,7 +60,7 @@ async def test_extract_gives_up_without_a_readable_id_token(provider, tokens):
 
 
 async def test_extract_drops_empty_claims(provider):
-    bare = jwt.encode({"email": ""}, "k" * 32)
+    bare = signed_id_token({"email": ""})
 
     assert await provider._extract_upstream_claims({"id_token": bare}, include_access_token=True) == {"id_token": bare}
 
@@ -174,3 +178,46 @@ async def test_load_access_token_raises_when_the_store_is_down(provider, validat
 
     with pytest.raises(ConnectionError):
         await provider.load_access_token("issued")
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [
+        jwt.encode({"aud": "chatwoot-mcp-client", "sub": "uuid-1", "email": "boss@example.com"}, "k" * 32),
+        signed_id_token({"sub": "uuid-1", "email": "boss@example.com"}, audience="another-client"),
+    ],
+    ids=["not-signed-by-the-idp", "for-another-client"],
+)
+async def test_an_id_token_that_does_not_verify_is_rejected(provider, forged):
+    # Whoever answers the token endpoint cannot choose the identity the SSO handoff asks Chatwoot for.
+    assert await provider._extract_upstream_claims({"id_token": forged}, include_access_token=True) is None
+
+
+async def test_an_id_token_for_another_user_than_the_access_token_is_rejected(provider, validated):
+    provider.next_validated = validated
+    other = signed_id_token({"sub": "uuid-2", "email": "boss@example.com"})
+    wire(
+        provider,
+        mapping=SimpleNamespace(upstream_token_id="up-1"),
+        token_set=SimpleNamespace(raw_token_data={"id_token": other, "access_token": "fresh"}),
+    )
+    assert await provider.load_access_token("issued") is None
+
+
+async def test_the_key_set_is_fetched_once_and_again_only_for_a_new_key():
+    from chatwoot_mcp.platform.cognito import JWKS_REFETCH_SECONDS, IdTokenVerifier
+    from tests.conftest import ID_TOKEN_AUDIENCE, ID_TOKEN_JWKS
+
+    fetches, now = [], [0.0]
+
+    async def fetch():
+        fetches.append(1)
+        return ID_TOKEN_JWKS
+
+    verifier = IdTokenVerifier(fetch, ID_TOKEN_AUDIENCE, clock=lambda: now[0])
+    assert (await verifier.claims(ID_TOKEN))["sub"] == "uuid-1"
+    assert (await verifier.claims(ID_TOKEN))["sub"] == "uuid-1"
+    unknown = jwt.encode({"sub": "x"}, "k" * 32, headers={"kid": "rotated"})
+    assert await verifier.claims(unknown) is None and len(fetches) == 1
+    now[0] += JWKS_REFETCH_SECONDS
+    assert await verifier.claims(unknown) is None and len(fetches) == 2

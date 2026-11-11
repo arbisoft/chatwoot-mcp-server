@@ -1,9 +1,11 @@
 # Build context is the repository root: docker build -t chatwoot-mcp .
-FROM python:3.12-slim
+# Base images are pinned by digest (multi-arch index), so a pushed tag cannot change what is built; Dependabot
+# proposes updates (.github/dependabot.yml).
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /usr/local/bin/uv
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \

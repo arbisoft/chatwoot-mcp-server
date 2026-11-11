@@ -7,11 +7,14 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastmcp import Client
 from starlette.testclient import TestClient
 
 from chatwoot_mcp.config import Settings
+from chatwoot_mcp.platform.cognito import IdTokenVerifier
 from chatwoot_mcp.server import build_server
 
 if TYPE_CHECKING:
@@ -277,3 +280,22 @@ class FakeSsoChatwoot(RecordingTransport):
 
 def query_of(location: str) -> dict[str, list[str]]:
     return parse_qs(location.split("?", 1)[1])
+
+
+# id_tokens in platform tests are RS256-signed like Cognito's, and verified against this key set.
+_ID_TOKEN_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+ID_TOKEN_AUDIENCE = "chatwoot-mcp-client"
+ID_TOKEN_JWKS = {
+    "keys": [{**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(_ID_TOKEN_KEY.public_key())), "kid": "test-key"}]
+}
+
+
+def signed_id_token(claims: dict[str, Any], *, audience: str = ID_TOKEN_AUDIENCE) -> str:
+    return jwt.encode({"aud": audience, **claims}, _ID_TOKEN_KEY, algorithm="RS256", headers={"kid": "test-key"})
+
+
+def id_token_verifier(audience: str = ID_TOKEN_AUDIENCE) -> IdTokenVerifier:
+    async def fetch() -> dict[str, Any]:
+        return ID_TOKEN_JWKS
+
+    return IdTokenVerifier(fetch, audience)

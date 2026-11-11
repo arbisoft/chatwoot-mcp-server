@@ -7,13 +7,16 @@ account id, so the assistant cannot move to another account.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastmcp.server.auth import AuthCheck
-from mcp.types import ToolAnnotations
+from fastmcp.server.dependencies import get_context
+from fastmcp.server.elicitation import AcceptedElicitation
+from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
 from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootClient, ChatwootError, to_tool_error
@@ -161,7 +164,37 @@ async def confirmation_refusal(
     except Exception:
         logger.warning("could not read a confirmation", exc_info=True)
         return CONFIRMATION_STORE_DOWN
-    return None
+    return await human_refusal(action, payload)
+
+
+APPROVE = "approve"
+APPROVAL_TEXT_CHARS = 4000
+NOT_APPROVED = "Error: the user did not approve this in the approval prompt; nothing was changed"
+
+
+async def human_refusal(action: str, payload: Any) -> str | None:
+    """Ask the person directly when the client can show an approval prompt (MCP elicitation).
+
+    The model holds the confirmation token, so on its own the token proves only that a preview was made; the prompt
+    goes to the person, and the model cannot answer it. Clients without elicitation (and stateless HTTP, where the
+    server keeps no client capabilities) keep the token-only step. ``None`` means approved or not askable.
+    """
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        return None
+    if not ctx.session.check_client_capability(ClientCapabilities(elicitation=ElicitationCapability())):
+        return None
+    details = json.dumps(payload, ensure_ascii=False, indent=2, default=str)[:APPROVAL_TEXT_CHARS]
+    message = f"Approve: {action.replace('_', ' ')} in Chatwoot?\n{details}"
+    try:
+        answer = await ctx.elicit(message, response_type=[APPROVE, "cancel"])
+    except Exception:
+        logger.warning("could not ask the user to approve %s", action, exc_info=True)
+        return NOT_APPROVED
+    if isinstance(answer, AcceptedElicitation) and answer.data == APPROVE:
+        return None
+    return NOT_APPROVED
 
 
 @dataclass(frozen=True)

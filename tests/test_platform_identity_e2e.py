@@ -19,7 +19,7 @@ from chatwoot_mcp.platform.cognito import _correct_expires_in, _true_expires_in
 from chatwoot_mcp.platform.http import build_platform_server
 from chatwoot_mcp.platform.settings import PlatformSettings, community_settings
 from chatwoot_mcp.platform.storage import MemoryKeyValue
-from tests.conftest import MCP_HEADERS, FakeSsoChatwoot
+from tests.conftest import MCP_HEADERS, FakeSsoChatwoot, id_token_verifier, signed_id_token
 
 ISSUER = "https://cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_test"
 CLIENT_ID = "cognito-app-client"
@@ -35,6 +35,7 @@ ENV = {
     "MCP_ALLOWED_CLIENT_REDIRECT_URIS": "https://claude.ai/api/mcp/auth_callback",
     # The id_tokens below carry the overlay's stamp, which only exists (and is only trusted) with capture on.
     "LAUNCHPAD_EMAIL_CAPTURE": "true",
+    "MCP_ID_TOKEN_JWKS_URL": "https://auth.example.test/.well-known/jwks.json",
 }
 DISCOVERY = OIDCConfiguration(
     strict=False,
@@ -70,6 +71,7 @@ def server(monkeypatch, chatwoot):
     keys = RSAKeyPair.generate()
     mcp.auth._token_validator.public_key = keys.public_key
     mcp.auth._token_validator.jwks_uri = None
+    mcp.auth.id_tokens = id_token_verifier(CLIENT_ID)
     return app, mcp.auth, keys
 
 
@@ -81,7 +83,10 @@ async def sign_in(provider, keys: RSAKeyPair, email: str, username: str, *, seal
         scopes=["openid"],
         additional_claims={"token_use": "access", "username": f"uuid-{username}", "client_id": CLIENT_ID},
     )
-    id_token = jwt.encode({"email": email, "cognito:username": username, "preferred_username": username}, "k" * 32)
+    id_token = signed_id_token(
+        {"sub": f"uuid-{username}", "email": email, "cognito:username": username, "preferred_username": username},
+        audience=CLIENT_ID,
+    )
     now = time.time()
     upstream_id, jti = f"up-{username}", f"jti-{username}"
     await provider._upstream_token_store.put(

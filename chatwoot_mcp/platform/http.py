@@ -43,7 +43,7 @@ from chatwoot_mcp.client import ChatwootClient
 from chatwoot_mcp.config import ConfigError, Settings
 from chatwoot_mcp.confirmations import ConfirmationBackend
 from chatwoot_mcp.credentials import API_KEY_MOUNT_PATH, api_key_mount
-from chatwoot_mcp.platform.cognito import ChatwootCognitoProvider
+from chatwoot_mcp.platform.cognito import ChatwootCognitoProvider, IdTokenVerifier
 from chatwoot_mcp.platform.credentials import MintedCredentialProvider, platform_tier_resolver
 from chatwoot_mcp.platform.identity import current_identity, identity_for
 from chatwoot_mcp.platform.mint import CACHE_SALT, TokenCache, TokenEndpoint, TokenMinter
@@ -98,6 +98,7 @@ def build_cognito_provider(platform: PlatformSettings, oauth_storage: AsyncKeyVa
         provider._upstream_authorization_endpoint = platform.upstream_auth_url
     if platform.upstream_token_url:
         provider._upstream_token_endpoint = platform.upstream_token_url
+    provider.id_tokens = IdTokenVerifier.from_url(platform.jwks_url, platform.client_id)
     return provider
 
 

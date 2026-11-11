@@ -15,16 +15,18 @@ mint needs the identity the browser login uses, so this provider:
 - corrects the upstream ``expires_in`` on both grants
   (:func:`_correct_expires_in`).
 
-The id_token is decoded without signature verification. That is safe: it
-comes from Cognito's token endpoint over the provider's own server-to-server
-call, never from the MCP client, and the inbound access token is still
-JWKS-verified on every request.
+The id_token's signature and audience are verified (:class:`IdTokenVerifier`) against Cognito's JWKS, or, with
+``LAUNCHPAD_EMAIL_CAPTURE`` on, against mpass-auth-proxy's, which re-signs it with the overlaid email; and its
+``sub`` must match the JWKS-verified access token's. So a token endpoint that is answered by anyone else, or an
+id_token for another user, is rejected. Its ``exp`` is not checked: the access token, verified on every request,
+carries the session's freshness.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -45,6 +47,10 @@ PREFERRED_USERNAME_CLAIM = "preferred_username"
 ACCESS_TOKEN_CLAIM = "access_token"
 
 STORE_PROBE_KEY = "chatwoot-mcp-store-probe"
+
+SUB_CLAIM = "sub"
+# A key we have not seen is looked up again at most this often, so a forged kid cannot make every request fetch.
+JWKS_REFETCH_SECONDS = 60
 
 MIN_EXPIRES_IN_SECONDS = 60
 EXPIRES_IN_DRIFT_TOLERANCE_SECONDS = 1
@@ -108,7 +114,58 @@ def _field(record: Any, name: str) -> Any:
     return getattr(record, name, None)
 
 
+JwksFetcher = Callable[[], Awaitable[dict[str, Any]]]
+
+
+class IdTokenVerifier:
+    """Checks an id_token's RS256 signature against a JWKS, and its audience; keys are cached in process."""
+
+    def __init__(self, fetch: JwksFetcher, audience: str, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._fetch = fetch
+        self._audience = audience
+        self._clock = clock
+        self._keys: dict[str, Any] = {}
+        self._fetched_at: float | None = None
+
+    @classmethod
+    def from_url(cls, url: str, audience: str, *, timeout: float = 10.0) -> IdTokenVerifier:
+        async def fetch() -> dict[str, Any]:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.json()
+
+        return cls(fetch, audience)
+
+    async def _key(self, kid: str | None) -> Any:
+        stale = self._fetched_at is None or self._clock() - self._fetched_at >= JWKS_REFETCH_SECONDS
+        if kid not in self._keys and stale:
+            self._keys = {key.key_id: key.key for key in jwt.PyJWKSet.from_dict(await self._fetch()).keys}
+            self._fetched_at = self._clock()
+        return self._keys.get(kid)
+
+    async def claims(self, id_token: str) -> dict[str, Any] | None:
+        """The verified claims, or ``None`` for a token that does not verify. A JWKS fetch failure raises."""
+        try:
+            kid = jwt.get_unverified_header(id_token).get("kid")
+        except jwt.PyJWTError:
+            return None
+        key = await self._key(kid)
+        if key is None:
+            logger.warning("the id_token is signed with an unknown key; rejecting it")
+            return None
+        try:
+            return jwt.decode(
+                id_token, key, algorithms=["RS256"], audience=self._audience, options={"verify_exp": False}
+            )
+        except jwt.PyJWTError as exc:
+            logger.warning("the id_token did not verify: %s", exc)
+            return None
+
+
 class ChatwootCognitoProvider(AWSCognitoProvider):
+    id_tokens: IdTokenVerifier
+
     def _create_upstream_oauth_client(self) -> AsyncOAuth2Client:
         """One factory serves both the code exchange and the refresh grant, so one registration covers both."""
         client = super()._create_upstream_oauth_client()
@@ -126,13 +183,12 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
         if id_token is None:
             logger.warning("the Cognito token response has no id_token; the caller's identity is unknown")
             return None
-        try:
-            claims = jwt.decode(id_token, options={"verify_signature": False})
-        except jwt.PyJWTError as exc:
-            logger.warning("could not decode the Cognito id_token: %s", exc)
+        claims = await self.id_tokens.claims(id_token)
+        if claims is None:
             return None
         extracted = {
             ID_TOKEN_KEY: id_token,
+            SUB_CLAIM: _string(claims.get(SUB_CLAIM)),
             EMAIL_CLAIM: _string(claims.get(EMAIL_CLAIM)),
             EMAIL_VERIFIED_CLAIM: True if claims.get(EMAIL_VERIFIED_CLAIM) is True else None,
             COGNITO_USERNAME_CLAIM: _string(claims.get(COGNITO_USERNAME_CLAIM)),
@@ -151,6 +207,9 @@ class ChatwootCognitoProvider(AWSCognitoProvider):
         upstream = await self._resolve_upstream_claims(token)
         if not upstream or not upstream.get(ID_TOKEN_KEY):
             logger.warning("could not resolve the upstream id_token for this session; rejecting the request")
+            return None
+        if upstream.get(SUB_CLAIM) != (validated.claims or {}).get(SUB_CLAIM):
+            logger.warning("the id_token belongs to another user than the access token; rejecting the request")
             return None
         claims = {**(validated.claims or {}), UPSTREAM_CLAIMS_KEY: upstream}
         return validated.model_copy(update={"claims": claims})

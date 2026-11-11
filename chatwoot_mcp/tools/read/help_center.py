@@ -1,5 +1,6 @@
-"""Help centre: ``search_help_articles``. Articles are written by the team and returned as they are, cut to the
-configured length. Drafts and archived articles are included; their ``status`` says which."""
+"""Help centre: ``search_help_articles``. Article titles and text are framed as untrusted: in Enterprise any custom
+role with ``knowledge_base_manage`` can write them, not only administrators. Text is cut to the configured length.
+Drafts and archived articles are included; their ``status`` says which."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from pydantic import Field
 
 from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Article
-from chatwoot_mcp.shaping import compact, truncate
+from chatwoot_mcp.shaping import compact, frame_untrusted, truncate, untrusted_field
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import READ, Page, ToolContext, as_dict
 
@@ -38,8 +39,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             content = truncate(article.content or "", context.max_chars)
             return compact(
                 {
-                    **article.model_dump(include=set(Article.model_fields) - {"content"}),
-                    "content": content.text,
+                    **article.model_dump(include=set(Article.model_fields) - {"content", "title"}),
+                    "title": untrusted_field(article.title, source="article_title", item_id=article.id),
+                    "content": frame_untrusted(content.text, source="article", item_id=article.id)
+                    if content.text
+                    else None,
                     "truncated": content.truncated or None,
                 }
             )
