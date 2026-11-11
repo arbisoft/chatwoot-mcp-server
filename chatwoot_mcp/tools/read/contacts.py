@@ -53,7 +53,9 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     @mcp.tool(**context.tool("List contacts", READ, module=MODULE, tier=Tier.AGENT))
     async def list_contacts(
         page: Page = 1,
-        labels: Annotated[list[str] | None, Field(description="Only customers with any of these labels.")] = None,
+        labels: Annotated[
+            list[str] | None, Field(max_length=20, description="Only customers with any of these labels.")
+        ] = None,
     ) -> dict[str, Any] | str:
         """Browse customers, 15 per page. To find a particular customer use search_contacts."""
         try:

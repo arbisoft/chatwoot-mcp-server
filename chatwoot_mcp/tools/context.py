@@ -24,9 +24,14 @@ from chatwoot_mcp.credentials import ChatwootCredential, CredentialProvider
 from chatwoot_mcp.shaping import Links
 from chatwoot_mcp.tiers import Tier, tier_allows
 
-ConversationId = Annotated[int, Field(ge=1, description="The conversation number shown in Chatwoot.")]
-ContactId = Annotated[int, Field(ge=1, description="The customer's id in Chatwoot. Use search_contacts to find it.")]
-Page = Annotated[int, Field(ge=1, description="Page number, starting at 1.")]
+# Chatwoot's ids are 32-bit. Bounding every id here also catches "99999999999" sent as a string, which pydantic turns
+# into an int only after the argument boundary has looked at it.
+MAX_ID = 2_147_483_647
+ConversationId = Annotated[int, Field(ge=1, le=MAX_ID, description="The conversation number shown in Chatwoot.")]
+ContactId = Annotated[
+    int, Field(ge=1, le=MAX_ID, description="The customer's id in Chatwoot. Use search_contacts to find it.")
+]
+Page = Annotated[int, Field(ge=1, le=MAX_ID, description="Page number, starting at 1.")]
 ConfirmationToken = Annotated[str, Field(min_length=1, max_length=200, description="From the prepare tool.")]
 
 logger = logging.getLogger(__name__)

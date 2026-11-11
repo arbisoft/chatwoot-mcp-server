@@ -35,7 +35,7 @@ DEFAULT_OFF_MODULES = frozenset({"replies", "macros"})
 DEFAULT_ENABLED_MODULES = frozenset(TOOL_MODULES) - DEFAULT_OFF_MODULES
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
-_URL = re.compile(r"https?://[^\s/]+(/\S*)?")
+URL_PATTERN = re.compile(r"https?://[^\s/]+(/\S*)?")
 
 
 class ConfigError(ValueError):
@@ -106,10 +106,10 @@ class Settings:
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         env = os.environ if environ is None else environ
         chatwoot_url = read_setting(env, "CHATWOOT_URL").rstrip("/")
-        if not _URL.fullmatch(chatwoot_url):
+        if not URL_PATTERN.fullmatch(chatwoot_url):
             raise ConfigError(f"CHATWOOT_URL must be an http:// or https:// address, got {chatwoot_url!r}")
         public_url = read_setting(env, "CHATWOOT_PUBLIC_URL").rstrip("/")
-        if public_url and not _URL.fullmatch(public_url):
+        if public_url and not URL_PATTERN.fullmatch(public_url):
             raise ConfigError(f"CHATWOOT_PUBLIC_URL must be an http:// or https:// address, got {public_url!r}")
         return cls(
             chatwoot_url=chatwoot_url,

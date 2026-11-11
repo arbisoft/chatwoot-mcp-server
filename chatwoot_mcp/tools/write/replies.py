@@ -21,6 +21,7 @@ from chatwoot_mcp.shaping import compact, shape_message, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
+    MAX_ID,
     PREPARE,
     ConfirmationToken,
     ContactId,
@@ -52,7 +53,7 @@ NEW_CHAT_CONTACT_FIELD: dict[str, str | None] = {
 # Twilio inboxes carry WhatsApp as ``medium``.
 NO_FIRST_MESSAGE_CHANNELS = frozenset({("Channel::Whatsapp", None), ("Channel::TwilioSms", "whatsapp")})
 
-InboxId = Annotated[int, Field(ge=1, description="The inbox to start the chat in. See list_inboxes.")]
+InboxId = Annotated[int, Field(ge=1, le=MAX_ID, description="The inbox to start the chat in. See list_inboxes.")]
 Content = Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="The message text.")]
 FirstMessage = Annotated[
     str | None,
@@ -162,6 +163,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return "Error: this customer has never written in through this inbox, so a new chat there cannot reach them"
         if inbox.lock_to_single_conversation:
             # Chatwoot then reuses the customer's last chat in the inbox instead of starting a new one.
+            # ponytail: sees only chats the caller may read (and the latest 25); a hidden one is still reused.
             try:
                 chats = Conversation.parse_rows(await session.get(f"/contacts/{contact_id}/conversations"))
             except ChatwootError as error:

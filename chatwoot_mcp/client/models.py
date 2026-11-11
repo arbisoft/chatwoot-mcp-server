@@ -1,15 +1,17 @@
 """Tolerant views of Chatwoot objects.
 
 Every model allows extra fields and coerces numbers to strings where a string is declared, so a Chatwoot upgrade
-that adds or retypes an attribute never breaks a tool. Only the fields the shapers read are declared. Lists come
-back from Chatwoot either bare or as ``{"payload": [...]}``; :func:`rows` reads both.
+that adds or retypes an attribute never breaks a tool. A JSON ``null`` reads as a missing field: nullable columns
+such as ``custom_attributes`` would otherwise fail one row, and with it the whole list it came in. Only the fields
+the shapers read are declared. Lists come back from Chatwoot either bare or as ``{"payload": [...]}``; :func:`rows`
+reads both.
 """
 
 from __future__ import annotations
 
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from chatwoot_mcp.client.errors import UnexpectedResponseError
 
@@ -18,6 +20,11 @@ Timestamp = int | float | str | None
 
 class ChatwootModel(BaseModel):
     model_config = ConfigDict(extra="allow", coerce_numbers_to_str=True, populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _nulls_are_missing(cls, data: Any) -> Any:
+        return {key: value for key, value in data.items() if value is not None} if isinstance(data, dict) else data
 
     @classmethod
     def parse(cls, data: Any) -> Self:

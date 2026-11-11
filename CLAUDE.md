@@ -72,7 +72,7 @@ docker build --platform linux/amd64 .
   default. The one exception is resolving (it can send a CSAT survey): `prepare_resolve_conversation` and
   `resolve_conversation` stay on with the other conversation writes. Validate and look things up in the `prepare_*`
   tool, so a doomed action never gets a token. A failed send says whether it surely did not go, may have gone, or
-  went (`replies.send_failure`).
+  went (`tools/context.send_failure`, also used by notes, new contacts and resolving).
 - `get_me` returns an allow-list of fields: the profile holds the user's access and pubsub tokens.
 - Do not log request URLs (`httpx` is set to WARNING): a customer search puts an email or phone in the URL.
 - Update the README tool tables with every tool change; `tests/test_tools.py` checks they match.

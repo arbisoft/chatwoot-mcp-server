@@ -8,9 +8,10 @@ and succeeds only if it has not expired and identity, action and payload all mat
 One identity may hold at most ``max_outstanding_per_identity`` live confirmations, so no single caller can fill the
 store, and the memory backend holds at most ``max_entries`` records in all.
 
-The backend is a two-method protocol: :class:`MemoryConfirmationBackend` (one process), and in platform mode
-``chatwoot_mcp.platform.storage.ValkeyConfirmationBackend`` (``SET key value EX ttl`` and ``GETDEL key``,
-Fernet-encrypted), shared by every replica. The per-identity limit is kept in each process.
+The backend is a small protocol (``put``, ``take``, ``exists``): :class:`MemoryConfirmationBackend` (one process),
+and in platform mode ``chatwoot_mcp.platform.storage.ValkeyConfirmationBackend`` (``SET key value EX ttl``,
+``GETDEL key`` and ``GET``, Fernet-encrypted), shared by every replica. The per-identity limit is kept in each
+process, and recounted against the shared store when it is reached.
 """
 
 from __future__ import annotations

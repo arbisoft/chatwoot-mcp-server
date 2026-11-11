@@ -19,6 +19,7 @@ from chatwoot_mcp.client.models import Attachment, Conversation
 from chatwoot_mcp.shaping import shape_attachment, shape_conversation, shape_report
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
+    MAX_ID,
     READ,
     ConversationId,
     Page,
@@ -32,9 +33,15 @@ CHATWOOT_ATTACHMENTS_PER_PAGE = 100
 
 Status = Literal["all", "open", "resolved", "pending", "snoozed"]
 Assignee = Literal["me", "unassigned", "all", "assigned"]
-InboxId = Annotated[int | None, Field(ge=1, description="Only chats in this inbox. Use list_inboxes to find ids.")]
-TeamId = Annotated[int | None, Field(ge=1, description="Only chats assigned to this team. Use list_teams for ids.")]
-Labels = Annotated[list[str] | None, Field(description="Only chats that carry at least one of these labels.")]
+InboxId = Annotated[
+    int | None, Field(ge=1, le=MAX_ID, description="Only chats in this inbox. Use list_inboxes to find ids.")
+]
+TeamId = Annotated[
+    int | None, Field(ge=1, le=MAX_ID, description="Only chats assigned to this team. Use list_teams for ids.")
+]
+Labels = Annotated[
+    list[str] | None, Field(max_length=20, description="Only chats that carry at least one of these labels.")
+]
 FilterOperator = Literal[
     "equal_to",
     "not_equal_to",

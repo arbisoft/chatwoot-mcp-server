@@ -166,3 +166,13 @@ async def test_a_chunked_body_that_grows_past_the_limit_reads_as_a_disconnect():
 
     await BodyLimit(app, max_bytes=10)({"type": "http", "headers": []}, receive, None)
     assert seen == ["http.request", "http.disconnect"]
+
+
+async def test_an_id_sent_as_a_huge_numeric_string_is_still_refused(settings, fake):
+    # The argument boundary sees a short string; the schema's upper bound catches it after pydantic's coercion.
+    from fastmcp import Client
+
+    async with Client(build_server(settings, transport=fake)) as client:
+        result = await client.call_tool("get_conversation", {"conversation_id": "99999999999"}, raise_on_error=False)
+    assert result.is_error and "less_than_equal" in result.content[0].text
+    assert [r for r in fake.requests if "/conversations" in r.url.path] == []

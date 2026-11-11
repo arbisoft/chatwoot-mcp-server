@@ -17,7 +17,7 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import CsatResponse
 from chatwoot_mcp.shaping import shape_csat, shape_report
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import READ, ChatwootSession, Page, ToolContext, as_dict, limited, tier_error
+from chatwoot_mcp.tools.context import MAX_ID, READ, ChatwootSession, Page, ToolContext, as_dict, limited, tier_error
 
 MODULE = "reports"
 MAX_DAYS = 366
@@ -70,7 +70,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         until: Until,
         type: Annotated[ReportType, Field(description="What to report on.")] = "account",  # noqa: A002
         id: Annotated[  # noqa: A002
-            int | None, Field(ge=1, description="The agent, inbox, label or team id. Required unless type is account.")
+            int | None,
+            Field(ge=1, le=MAX_ID, description="The agent, inbox, label or team id. Required unless type is account."),
         ] = None,
         business_hours: Annotated[bool, Field(description="Count only business hours.")] = False,
     ) -> dict[str, Any] | str:
@@ -139,11 +140,12 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         since: Since,
         until: Until,
         ratings: Annotated[
-            list[Annotated[int, Field(ge=1, le=5)]] | None, Field(description="Only these scores, 1 (worst) to 5.")
+            list[Annotated[int, Field(ge=1, le=5)]] | None,
+            Field(max_length=5, description="Only these scores, 1 (worst) to 5."),
         ] = None,
-        agent_id: Annotated[int | None, Field(ge=1, description="Only chats this agent handled.")] = None,
-        inbox_id: Annotated[int | None, Field(ge=1, description="Only chats in this inbox.")] = None,
-        team_id: Annotated[int | None, Field(ge=1, description="Only chats of this team.")] = None,
+        agent_id: Annotated[int | None, Field(ge=1, le=MAX_ID, description="Only chats this agent handled.")] = None,
+        inbox_id: Annotated[int | None, Field(ge=1, le=MAX_ID, description="Only chats in this inbox.")] = None,
+        team_id: Annotated[int | None, Field(ge=1, le=MAX_ID, description="Only chats of this team.")] = None,
         page: Page = 1,
     ) -> dict[str, Any] | str:
         """Read satisfaction-survey answers: the score and what the customer wrote, newest first. 25 per page."""

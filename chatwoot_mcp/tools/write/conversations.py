@@ -31,6 +31,7 @@ from chatwoot_mcp.client.models import Agent, Conversation, CustomAttributeDefin
 from chatwoot_mcp.shaping import compact, shape_attributes, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
+    MAX_ID,
     OVERWRITE,
     PREPARE,
     ChatwootSession,
@@ -82,8 +83,12 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     @mcp.tool(**context.tool("Assign conversation", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def assign_conversation(
         conversation_id: ConversationId,
-        agent_id: Annotated[int | None, Field(ge=1, description="The agent to assign. See list_agents.")] = None,
-        team_id: Annotated[int | None, Field(ge=1, description="The team to assign. See list_teams.")] = None,
+        agent_id: Annotated[
+            int | None, Field(ge=1, le=MAX_ID, description="The agent to assign. See list_agents.")
+        ] = None,
+        team_id: Annotated[
+            int | None, Field(ge=1, le=MAX_ID, description="The team to assign. See list_teams.")
+        ] = None,
     ) -> dict[str, Any] | str:
         """Assign a chat to an agent, a team, or both, replacing who it is assigned to now.
 

@@ -16,7 +16,15 @@ from functools import cached_property
 
 from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 
-from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings, env_flag, positive_int_setting, read_setting
+from chatwoot_mcp.config import (
+    LOG_LEVELS,
+    URL_PATTERN,
+    ConfigError,
+    Settings,
+    env_flag,
+    positive_int_setting,
+    read_setting,
+)
 
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 86400
 REFRESH_TOKEN_FALLBACK_SECONDS = 30 * 24 * 60 * 60
@@ -124,7 +132,19 @@ class PlatformSettings:
                 f"DEFAULT_EMAIL_DOMAIN={default_email_domain!r} must be a bare domain such as askii.ai "
                 "(no @, scheme, path or trailing dot)"
             )
-        log_level = read_setting(env, "MCP_LOG_LEVEL").upper()
+        log_level = read_setting(env, "MCP_LOG_LEVEL").upper() or "INFO"
+        if log_level not in LOG_LEVELS:
+            raise ConfigError(f"MCP_LOG_LEVEL must be one of {', '.join(sorted(LOG_LEVELS))}")
+        for name in ("MCP_BASE_URL", "COGNITO_UPSTREAM_AUTH_URL", "COGNITO_UPSTREAM_TOKEN_URL"):
+            value = read_setting(env, name)
+            if value and not URL_PATTERN.fullmatch(value):
+                raise ConfigError(f"{name} must be an http:// or https:// address, got {value!r}")
+        production = read_setting(env, "MCP_ENV").lower() == "production"
+        if production and not read_setting(env, "MCP_OAUTH_STORAGE_URL"):
+            raise ConfigError(
+                "MCP_ENV=production needs MCP_OAUTH_STORAGE_URL: without Valkey every login, cached key and "
+                "confirmation is lost on restart and not shared between replicas"
+            )
         return cls(
             base_url=read_setting(env, "MCP_BASE_URL").rstrip("/"),
             user_pool_id=read_setting(env, "COGNITO_USER_POOL_ID"),
@@ -144,8 +164,8 @@ class PlatformSettings:
             upstream_auth_url=read_setting(env, "COGNITO_UPSTREAM_AUTH_URL"),
             upstream_token_url=read_setting(env, "COGNITO_UPSTREAM_TOKEN_URL"),
             cors_origins=_split(read_setting(env, "MCP_ALLOWED_ORIGINS")) or ("*",),
-            log_level=log_level if log_level in LOG_LEVELS else "INFO",
-            production=read_setting(env, "MCP_ENV").lower() == "production",
+            log_level=log_level,
+            production=production,
             http_api_key_route=env_flag("CHATWOOT_HTTP_API_KEY_ROUTE", environ=env),
             email_capture=env_flag("LAUNCHPAD_EMAIL_CAPTURE", environ=env),
         )

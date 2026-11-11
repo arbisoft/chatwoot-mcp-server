@@ -15,7 +15,7 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import Message
 from chatwoot_mcp.shaping import shape_labels, shape_message
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import READ, ConversationId, ToolContext, as_dict, limited
+from chatwoot_mcp.tools.context import MAX_ID, READ, ConversationId, ToolContext, as_dict, limited
 
 MODULE = "messages"
 
@@ -25,9 +25,12 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     async def get_messages(
         conversation_id: ConversationId,
         before: Annotated[
-            int | None, Field(ge=1, description="Only messages older than this message id (to read further back).")
+            int | None,
+            Field(ge=1, le=MAX_ID, description="Only messages older than this message id (to read further back)."),
         ] = None,
-        after: Annotated[int | None, Field(ge=1, description="Only messages newer than this message id.")] = None,
+        after: Annotated[
+            int | None, Field(ge=1, le=MAX_ID, description="Only messages newer than this message id.")
+        ] = None,
     ) -> dict[str, Any] | str:
         """Read a chat's messages, oldest first. With no ids, the latest 20; pass `before` to read further back."""
         try:

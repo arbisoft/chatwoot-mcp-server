@@ -150,7 +150,7 @@ Without `MCP_OAUTH_STORAGE_URL` everything lives in process: it is lost on resta
 | `MCP_ACCESS_TOKEN_TTL_SECONDS` | `86400` | Lifetime of the token FastMCP issues to the MCP client |
 | `MCP_ALLOWED_ORIGINS` | `*` | CORS origins |
 | `MCP_LOG_LEVEL` | `INFO` | Log level; logs are JSON lines on stderr and audit lines are always kept |
-| `MCP_ENV` | | `production` adds a note to the warning when storage is in process |
+| `MCP_ENV` | | `production` refuses to start without `MCP_OAUTH_STORAGE_URL` |
 | `CHATWOOT_HTTP_API_KEY_ROUTE` | `false` | `true` mounts `/http/api-key/mcp` for personal keys, which bypasses the SSO proxy and the corporate-ID gate; logs a WARNING at startup |
 
 The community settings (`CHATWOOT_ENABLE_*`, `CHATWOOT_READ_ONLY`, timeouts, `MCP_HTTP_PORT`) apply as usual.

@@ -22,7 +22,7 @@ from chatwoot_mcp.client.models import (
 )
 from chatwoot_mcp.shaping import compact, truncate, untrusted_field
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import READ, Page, ToolContext, local_page
+from chatwoot_mcp.tools.context import MAX_ID, READ, Page, ToolContext, local_page
 
 MODULE = "reference"
 
@@ -55,7 +55,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("Get inbox", READ, module=MODULE, tier=Tier.AGENT))
     async def get_inbox(
-        inbox_id: Annotated[int, Field(ge=1, description="The inbox id. See list_inboxes.")],
+        inbox_id: Annotated[int, Field(ge=1, le=MAX_ID, description="The inbox id. See list_inboxes.")],
     ) -> dict[str, Any] | str:
         """Show one inbox's settings: greeting, working hours, auto-assignment and survey switches."""
         try:
@@ -86,7 +86,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
 
     @mcp.tool(**context.tool("List team members", READ, module=MODULE, tier=Tier.AGENT))
     async def list_team_members(
-        team_id: Annotated[int, Field(ge=1, description="The team id. See list_teams.")],
+        team_id: Annotated[int, Field(ge=1, le=MAX_ID, description="The team id. See list_teams.")],
         page: Page = 1,
     ) -> dict[str, Any] | str:
         """List the agents in one team."""

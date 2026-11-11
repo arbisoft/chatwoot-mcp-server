@@ -49,6 +49,7 @@ from chatwoot_mcp.credentials import (
 from chatwoot_mcp.shaping import UNTRUSTED_NOTICE, Links
 from chatwoot_mcp.tiers import TierResolver, community_tier_resolver, require_tier
 from chatwoot_mcp.tools import ToolContext, register_tools
+from chatwoot_mcp.tools.context import MAX_ID
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,6 @@ MCP_PATH = "/mcp"
 # Reading the static key's role at start-up is best effort; it must not keep a stdio client waiting.
 WARM_TIMEOUT_SECONDS = 5
 MAX_ARGUMENT_CHARS = 10_000
-MAX_ID = 2_147_483_647
 MAX_BODY_BYTES = 1_048_576
 # C0 controls and DEL, except tab, line feed and carriage return, which messages and notes use.
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")

@@ -166,3 +166,11 @@ async def test_contact_notes_are_paged_because_chatwoot_returns_them_all(setting
     second = await data(settings, fake, "get_contact_notes", {"contact_id": 4, "page": 2})
     assert len(first["notes"]) == 25 and first["next_page"] == 2
     assert [n["id"] for n in second["notes"]] == list(range(26, 31)) and "next_page" not in second
+
+
+async def test_one_contact_with_null_custom_attributes_does_not_break_the_list(settings, fake):
+    # custom_attributes is a nullable jsonb column in Chatwoot's schema.
+    rows = [{"id": 1, "name": "Ana"}, {"id": 2, "name": "Bo", "custom_attributes": None}]
+    fake.on("GET", "/contacts/search", json={"payload": rows})
+    out = await data(settings, fake, "search_contacts", {"query": "a"})
+    assert [c["id"] for c in out["contacts"]] == [1, 2]

@@ -23,6 +23,7 @@ from chatwoot_mcp.shaping import macro_steps, shape_person
 from chatwoot_mcp.tiers import Tier
 from chatwoot_mcp.tools.context import (
     IRREVERSIBLE,
+    MAX_ID,
     PREPARE,
     ConfirmationToken,
     ConversationId,
@@ -60,7 +61,7 @@ OUTWARD_STEPS = {
     "change_status": "changes the chat's status, which may resolve it and send the customer a satisfaction survey",
 }
 
-MacroId = Annotated[int, Field(ge=1, description="The macro to run. See list_macros.")]
+MacroId = Annotated[int, Field(ge=1, le=MAX_ID, description="The macro to run. See list_macros.")]
 
 
 def macro_payload(macro: Macro, conversation_id: int) -> dict[str, Any]:

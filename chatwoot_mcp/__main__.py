@@ -28,8 +28,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def configure_logging() -> None:
-    level = os.environ.get("MCP_LOG_LEVEL", "INFO").strip().upper()
-    logging.basicConfig(level=level if level in LOG_LEVELS else "INFO", stream=sys.stderr)
+    level = os.environ.get("MCP_LOG_LEVEL", "").strip().upper() or "INFO"
+    if level not in LOG_LEVELS:
+        sys.exit(f"chatwoot-mcp: MCP_LOG_LEVEL must be one of {', '.join(sorted(LOG_LEVELS))}")
+    logging.basicConfig(level=level, stream=sys.stderr)
     quiet_http_logs()
 
 

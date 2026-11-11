@@ -62,6 +62,7 @@ def test_settings_read_the_platform_env():
             "MCP_LOG_LEVEL": "debug",
             "MCP_ALLOWED_ORIGINS": "https://a.test,https://b.test",
             "MCP_ENV": "Production",
+            "MCP_OAUTH_STORAGE_URL": "redis://valkey:6379/3",
             "LAUNCHPAD_EMAIL_CAPTURE": "true",
         }
     )
@@ -82,9 +83,7 @@ def test_settings_read_the_platform_env():
 
 
 def test_settings_defaults():
-    settings = PlatformSettings.from_env(
-        {**ENV, "OIDC_CLIENT_SECRET": "", "MCP_JWT_SIGNING_KEY": "k", "MCP_LOG_LEVEL": "x"}
-    )
+    settings = PlatformSettings.from_env({**ENV, "OIDC_CLIENT_SECRET": "", "MCP_JWT_SIGNING_KEY": "k"})
 
     assert settings.scopes == ("openid",)
     assert settings.redirect_allowlist == [*DEFAULT_REDIRECT_URIS, "https://claude.ai/api/mcp/auth_callback"]
@@ -128,6 +127,10 @@ def test_settings_read_the_api_key_route_flag(raw, expected):
         ({"DEFAULT_EMAIL_DOMAIN": "askii.ai."}, "bare domain"),
         ({"DEFAULT_EMAIL_DOMAIN": "askii.ai/x"}, "bare domain"),
         ({"DEFAULT_EMAIL_DOMAIN": "-askii.ai"}, "bare domain"),
+        ({"MCP_LOG_LEVEL": "loud"}, "MCP_LOG_LEVEL must be one of"),
+        ({"MCP_BASE_URL": "chat-mcp.example.test"}, "MCP_BASE_URL must be an http"),
+        ({"COGNITO_UPSTREAM_TOKEN_URL": "mpass-auth-proxy:8000/token"}, "COGNITO_UPSTREAM_TOKEN_URL"),
+        ({"MCP_ENV": "production"}, "needs MCP_OAUTH_STORAGE_URL"),
     ],
 )
 def test_settings_refuse_an_unsafe_or_incomplete_env(overrides, message):
@@ -431,14 +434,10 @@ def test_the_namespace_separates_deployments_sharing_one_valkey():
     assert first.namespace(1) == PlatformSettings.from_env(ENV).namespace(1)
 
 
-def test_a_bad_log_level_falls_back_to_info_in_community_mode(monkeypatch):
-    import logging
-
+def test_a_bad_log_level_stops_community_mode_at_start_up(monkeypatch):
     monkeypatch.setenv("MCP_LOG_LEVEL", "loud")
-    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
-    seen: dict = {}
-    cli.configure_logging()
-    assert seen["level"] == "INFO"
+    with pytest.raises(SystemExit, match="MCP_LOG_LEVEL must be one of"):
+        cli.configure_logging()
 
 
 @pytest.mark.parametrize("raw", ["ture", "enabled", '"true"'])
