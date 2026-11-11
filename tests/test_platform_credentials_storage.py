@@ -193,3 +193,31 @@ async def test_the_memory_store_sweeps_expired_entries_now_and_then():
     for n in range(MemoryKeyValue.SWEEP_EVERY):
         await store.set(f"k{n}", "v", 10)
     assert "old" not in store._values
+
+
+async def test_a_passing_key_fetch_failure_hides_tools_for_that_request_only(chatwoot):
+    # Hunzla's probe: a Valkey blip or a 503 must not hide every tool for the next 60 seconds.
+    class FlakyStore(MemoryKeyValue):
+        fail = True
+
+        async def get(self, key):
+            if FlakyStore.fail:
+                raise ConnectionError("valkey blip")
+            return await super().get(key)
+
+    provider = MintedCredentialProvider(minter(chatwoot, FlakyStore()), identity_source=lambda: ADA)
+    resolve = platform_tier_resolver(provider, identity_of=lambda token: ADA)
+    token = AccessToken(token="t", client_id="c", scopes=[])
+    assert await resolve(token) is Tier.NONE
+    FlakyStore.fail = False
+    assert await resolve(token) is Tier.AGENT
+
+
+async def test_a_real_refusal_is_remembered_as_no_tier(chatwoot):
+    chatwoot.users["ada@example.com"].member = False
+    provider = MintedCredentialProvider(minter(chatwoot), identity_source=lambda: ADA)
+    resolve = platform_tier_resolver(provider, identity_of=lambda token: ADA)
+    token = AccessToken(token="t", client_id="c", scopes=[])
+    assert await resolve(token) is Tier.NONE
+    handoffs = chatwoot.handoff_count()
+    assert await resolve(token) is Tier.NONE and chatwoot.handoff_count() == handoffs

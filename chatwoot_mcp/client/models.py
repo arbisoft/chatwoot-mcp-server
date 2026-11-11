@@ -152,6 +152,7 @@ class Inbox(ChatwootModel):
     enable_auto_assignment: bool | None = None
     allow_messages_after_resolved: bool | None = None
     lock_to_single_conversation: bool | None = None
+    medium: str | None = None
 
 
 class Label(ChatwootModel):

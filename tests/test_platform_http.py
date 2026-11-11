@@ -279,8 +279,12 @@ def test_json_formatter_includes_the_error():
 
 
 def test_configure_logging_installs_one_json_handler(monkeypatch):
-    for name in platform_http.LOGGERS:
-        monkeypatch.setattr(logging.getLogger(name), "handlers", [])
+    # Restore every attribute configure_logging sets, so later tests see the loggers as they were.
+    for name in (*platform_http.LOGGERS, platform_http.AUDIT_LOGGER, "httpx"):
+        target = logging.getLogger(name)
+        for attribute in ("handlers", "level", "propagate"):
+            monkeypatch.setattr(target, attribute, getattr(target, attribute))
+    monkeypatch.setattr(logging.getLogger("chatwoot_mcp"), "handlers", [])
     platform_http.configure_logging("WARNING")
     platform_http.configure_logging("WARNING")
 
@@ -289,6 +293,8 @@ def test_configure_logging_installs_one_json_handler(monkeypatch):
     assert len(target.handlers) == 1
     assert isinstance(target.handlers[0].formatter, platform_http.JSONFormatter)
     assert target.level == logging.WARNING
+    # Platform mode quiets httpx too: its INFO lines carry full URLs, with customer emails and phones in searches.
+    assert logging.getLogger("httpx").level == logging.WARNING
 
 
 @pytest.fixture

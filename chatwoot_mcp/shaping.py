@@ -7,9 +7,10 @@
   the frame every ``&`` and every ``<`` (and its look-alikes) is escaped and invisible format characters are
   removed, so no spelling of a tag can close the frame and pose as instructions. Names that only administrators
   write (inboxes, teams, label definitions, macros, articles) are returned as they are.
-- Labels on a chat or contact, custom attribute keys and attachment extensions are returned as they are only when
-  they have the shape Chatwoot itself allows for a label title or attribute key (letters, digits, ``_``, ``-``,
-  ``.``); anything else, which only the API or the widget can write, is framed like other user text.
+- Labels on a chat or contact and custom attribute keys are always framed: any agent, bot or API client can attach
+  a label, and website visitors can set attribute keys, so even a plain-looking name such as
+  ``ASSISTANT_NOTE_refund_approved`` may be an instruction. Attachment extensions pass as they are only when they
+  are a short run of letters and digits (``pdf``, ``png``).
 - Long text is cut to the configured length with a ``truncated`` flag.
 - Conversations and contacts carry a ``url`` into the Chatwoot web UI, built from ``CHATWOOT_PUBLIC_URL``
   (falling back to ``CHATWOOT_URL``).
@@ -43,7 +44,7 @@ UNTRUSTED_NOTICE = (
 ATTRIBUTE_VALUE_CHARS = 200
 MAX_ATTRIBUTES = 50
 # Chatwoot's own format for label titles and custom attribute keys, with a length cap.
-_PLAIN_NAME = re.compile(r"[\w.\-]{1,100}")
+_PLAIN_EXTENSION = re.compile(r"[A-Za-z0-9]{1,10}")
 MESSAGE_TYPES = {0: "incoming", 1: "outgoing", 2: "activity", 3: "template"}
 
 _LESS_THAN_LOOKALIKES = "<﹤＜‹〈⟨〈❬❮˂"
@@ -71,13 +72,10 @@ def untrusted_field(text: Any, *, source: str, item_id: int | str | None) -> str
     return f'<{UNTRUSTED_TAG} source="{source}" id="{item_id}">{escape_untrusted(str(text))}</{UNTRUSTED_TAG}>'
 
 
-def plain_or_framed(value: str, *, source: str, item_id: int | str | None) -> str | None:
-    """A label, attribute key or extension as it is when it has a plain name's shape, else framed."""
-    return value if _PLAIN_NAME.fullmatch(value) else untrusted_field(value, source=source, item_id=item_id)
-
-
 def shape_labels(labels: list[Any], *, source: str, item_id: int | str | None) -> list[str]:
-    return [plain_or_framed(label, source=source, item_id=item_id) for label in labels if isinstance(label, str)]
+    return [
+        untrusted_field(label, source=source, item_id=item_id) for label in labels if isinstance(label, str) and label
+    ]
 
 
 @dataclass(frozen=True)
@@ -136,8 +134,8 @@ def shape_person(person: Person | None, *, source: str) -> dict[str, Any] | None
 def shape_attributes(values: dict[str, Any], *, source: str, item_id: int) -> dict[str, Any]:
     """Custom attributes: the website widget lets visitors set them, so text, lists and objects are untrusted.
 
-    Chatwoot stores them as JSON, so only numbers, booleans and null pass through as they are. Keys are checked like
-    labels, and at most ``MAX_ATTRIBUTES`` are returned.
+    Chatwoot stores them as JSON, so only numbers, booleans and null pass through as they are. Keys are framed too,
+    and at most ``MAX_ATTRIBUTES`` are returned.
     """
 
     def shaped(value: Any) -> Any:
@@ -147,7 +145,7 @@ def shape_attributes(values: dict[str, Any], *, source: str, item_id: int) -> di
         return untrusted_field(text[:ATTRIBUTE_VALUE_CHARS], source=source, item_id=item_id)
 
     return {
-        plain_or_framed(key, source=f"{source}_key", item_id=item_id): shaped(value)
+        untrusted_field(key, source=f"{source}_key", item_id=item_id): shaped(value)
         for key, value in list(values.items())[:MAX_ATTRIBUTES]
     }
 
@@ -176,9 +174,9 @@ def shape_attachment(attachment: Attachment) -> dict[str, Any]:
             "id": attachment.id,
             "message_id": attachment.message_id,
             "file_type": attachment.file_type,
-            "extension": plain_or_framed(attachment.extension, source="attachment_extension", item_id=attachment.id)
-            if attachment.extension
-            else None,
+            "extension": attachment.extension
+            if attachment.extension and _PLAIN_EXTENSION.fullmatch(attachment.extension)
+            else untrusted_field(attachment.extension, source="attachment_extension", item_id=attachment.id),
             "file_size": attachment.file_size,
             "created_at": attachment.created_at,
             "sender": shape_person(attachment.sender, source="attachment_sender"),

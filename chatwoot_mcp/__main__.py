@@ -16,7 +16,7 @@ import uvicorn
 
 from chatwoot_mcp import platform
 from chatwoot_mcp.config import LOG_LEVELS, ConfigError, Settings
-from chatwoot_mcp.server import build_http_app, build_server
+from chatwoot_mcp.server import build_http_app, build_server, quiet_http_logs
 
 TRANSPORTS = ("stdio", "http")
 
@@ -30,8 +30,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def configure_logging() -> None:
     level = os.environ.get("MCP_LOG_LEVEL", "INFO").strip().upper()
     logging.basicConfig(level=level if level in LOG_LEVELS else "INFO", stream=sys.stderr)
-    # httpx logs every full URL, and a customer search puts the customer's email or phone in the URL.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    quiet_http_logs()
 
 
 def main(argv: Sequence[str] | None = None) -> None:

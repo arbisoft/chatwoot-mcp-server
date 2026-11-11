@@ -71,8 +71,11 @@ class CredentialProvider(Protocol):
 
 def profile_from(profile: ChatwootProfile, account_id: int) -> Profile:
     account = profile.account(account_id)
-    permissions = frozenset(account.permissions) if account else frozenset()
-    return Profile(tier=tier_for(account.permissions if account else None), permissions=permissions)
+    if account is None:
+        return Profile(tier=tier_for(None))
+    # Older Chatwoot lists no permissions, only the role, which names the same two built-in roles.
+    held = account.permissions or ([account.role] if account.role else [])
+    return Profile(tier=tier_for(held), permissions=frozenset(held))
 
 
 async def fetch_profile(client: ChatwootClient, token: str, account_id: int) -> Profile:

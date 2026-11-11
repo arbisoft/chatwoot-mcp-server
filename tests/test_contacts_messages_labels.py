@@ -80,7 +80,7 @@ async def test_get_messages_frames_text_and_says_where_to_continue(settings, fak
     )
     assert fake.calls("GET", "/conversations/12/messages")[-1].url.params["after"] == "40"
     assert [m["id"] for m in out["messages"]] == [41, 42] and "after=42" in out["truncated"]
-    assert out["labels"] == ["vip"] and out["messages"][0]["content"].startswith("<untrusted_content")
+    assert unframed(out["labels"]) == ["vip"] and out["messages"][0]["content"].startswith("<untrusted_content")
 
 
 async def test_get_messages_between_two_ids_skips_the_lower_one_and_keeps_both_bounds(settings, fake):
@@ -129,7 +129,7 @@ async def test_adding_labels_keeps_the_others_matches_any_case_and_never_duplica
     label_routes(fake, ["vip"])
     out = await data(settings, fake, "add_conversation_labels", {"conversation_id": 12, "labels": ["Refund", "refund"]})
     assert fake.last_json("POST", "/conversations/12/labels") == {"labels": ["vip", "refund"]}
-    assert out == {"conversation_id": 12, "labels": ["vip", "refund"]}
+    assert unframed(out) == {"conversation_id": 12, "labels": ["vip", "refund"]}
 
 
 async def test_unknown_labels_are_refused_so_none_are_invented(settings, fake):
@@ -143,7 +143,7 @@ async def test_removing_labels_keeps_the_others(settings, fake):
     out = await data(
         settings, fake, "remove_conversation_labels", {"conversation_id": 12, "labels": ["REFUND", "nope"]}
     )
-    assert out == {"conversation_id": 12, "labels": ["vip", "bug"]}
+    assert unframed(out) == {"conversation_id": 12, "labels": ["vip", "bug"]}
 
 
 async def test_contact_labels(settings, fake):
@@ -151,9 +151,10 @@ async def test_contact_labels(settings, fake):
     fake.on("GET", "/contacts/4/labels", json={"payload": []})
     fake.on("POST", "/contacts/4/labels", json={"payload": ["vip"]})
     assert await data(settings, fake, "get_contact_labels", {"contact_id": 4}) == {"contact_id": 4, "labels": []}
-    assert (await data(settings, fake, "add_contact_labels", {"contact_id": 4, "labels": ["vip"]}))["labels"] == ["vip"]
+    added = await data(settings, fake, "add_contact_labels", {"contact_id": 4, "labels": ["vip"]})
+    assert unframed(added["labels"]) == ["vip"] and added["labels"][0].startswith("<untrusted_content")
     fake.on("GET", "/conversations/9/labels", json={"payload": ["bug"]})
-    assert await data(settings, fake, "get_conversation_labels", {"conversation_id": 9}) == {
+    assert unframed(await data(settings, fake, "get_conversation_labels", {"conversation_id": 9})) == {
         "conversation_id": 9,
         "labels": ["bug"],
     }

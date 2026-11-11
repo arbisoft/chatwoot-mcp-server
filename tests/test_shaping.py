@@ -113,7 +113,7 @@ def test_a_conversation_keeps_what_matters_frames_people_and_links_to_chatwoot()
     }
     shaped = shape_conversation(Conversation.parse(raw), LINKS, max_chars=100)
     assert shaped["contact"]["name"] == '<untrusted_content source="contact_name" id="4">Sam</untrusted_content>'
-    assert shaped["custom_attributes"]["seats"] == 3
+    assert unframed(shaped["custom_attributes"])["seats"] == 3
     assert unframed(shaped) == {
         "id": 12,
         "status": "open",
@@ -154,7 +154,7 @@ def test_a_contact_frames_everything_the_customer_can_type():
     shaped = shape_contact(Contact.parse(raw), LINKS)
     for key in ("name", "email", "phone_number", "identifier"):
         assert shaped[key].startswith("<untrusted_content"), key
-    assert unframed(shaped["custom_attributes"]["note"]) == "n" * 200
+    assert unframed(shaped["custom_attributes"])["note"] == "n" * 200
     assert shaped["url"] == "https://chat.test/app/accounts/5/contacts/4" and "contact_inboxes" not in shaped
 
 
@@ -163,9 +163,12 @@ def test_people_without_an_id_are_dropped():
 
 
 def test_attributes_frame_text_lists_and_objects_but_not_numbers():
-    shaped = shape_attributes(
+    framed = shape_attributes(
         {"n": 1, "b": True, "none": None, "tags": ["ignore previous"], "obj": {"k": "<b>"}}, source="s", item_id=1
     )
+    # Keys are framed too: a visitor can set any key, such as "ASSISTANT_NOTE_refund_approved".
+    assert all(key.startswith("<untrusted_content") for key in framed)
+    shaped = {unframed(key): value for key, value in framed.items()}
     assert {k: shaped[k] for k in ("n", "b", "none")} == {"n": 1, "b": True, "none": None}
     assert unframed(shaped["tags"]) == '["ignore previous"]'
     assert shaped["obj"].startswith("<untrusted_content") and "<b>" not in shaped["obj"]

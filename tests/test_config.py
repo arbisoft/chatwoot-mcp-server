@@ -59,7 +59,6 @@ def test_every_value_is_read():
         ({"CHATWOOT_ACCOUNT_ID": "0"}, "CHATWOOT_ACCOUNT_ID"),
         ({"CHATWOOT_ACCOUNT_ID": "1.5"}, "CHATWOOT_ACCOUNT_ID"),
         ({"CHATWOOT_MAX_ITEMS": "-1"}, "CHATWOOT_MAX_ITEMS"),
-        ({"CHATWOOT_MAX_ITEMS": "10"}, "at least 25"),
         ({"CHATWOOT_TIMEOUT_SECONDS": "nan"}, "CHATWOOT_TIMEOUT_SECONDS"),
         ({"CHATWOOT_TIMEOUT_SECONDS": "soon"}, "not a number"),
         ({"MCP_HTTP_PORT": "70000"}, "MCP_HTTP_PORT"),

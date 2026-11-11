@@ -148,3 +148,12 @@ async def test_an_unexpected_resolver_error_shows_every_tool():
             raise RuntimeError("boom")
 
     assert await community_tier_resolver(Broken(), filter_by_role=True)(None) is None
+
+
+@pytest.mark.parametrize(("role", "tier"), [("administrator", Tier.ADMIN), ("agent", Tier.AGENT)])
+def test_an_older_chatwoot_without_permissions_falls_back_to_the_role(role, tier):
+    from chatwoot_mcp.client.models import Profile as ChatwootProfile
+    from chatwoot_mcp.credentials import profile_from
+
+    older = ChatwootProfile.parse({"id": 1, "accounts": [{"id": ACCOUNT_ID, "role": role}]})
+    assert profile_from(older, ACCOUNT_ID).tier is tier

@@ -2,7 +2,7 @@
 
 Runs the Chatwoot fork and this MCP server behind [Pressingly/mpass-sso-devkit](https://github.com/Pressingly/mpass-sso-devkit),
 the local copy of the platform's mPass SSO edge. Clone the devkit and the Chatwoot fork next to this repository, so
-the devkit can build both from `../chatwoot` and `../chatwoot-mcp`, and copy `docker-compose.chatwoot.yml` and
+the devkit can build both from `../chatwoot` and `../chatwoot-mcp-server`, and copy `docker-compose.chatwoot.yml` and
 `setup-chatwoot.sh` into the devkit:
 
 ```bash

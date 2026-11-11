@@ -64,8 +64,9 @@ docker build --platform linux/amd64 .
   `Error:` string. Shape the result in `shaping.py`; never return Chatwoot's raw payload.
 - Text a customer, visitor or user wrote is untrusted: return it through `shaping.untrusted_field` or
   `frame_untrusted`, never raw. That includes agent names and canned responses: agents set their own names and any
-  agent can write a canned response. Names only administrators write (inboxes, teams, labels, macros) are returned
-  as is.
+  agent can write a canned response. Labels on a chat or contact and custom attribute keys are framed too: any agent,
+  bot or visitor can write them. Names only administrators write (inboxes, teams, label definitions, macros) are
+  returned as is.
 - Anything that reaches the customer or runs many steps (replies, macros) is a `prepare_*` tool plus a confirming
   tool, through `prepared(...)` and `confirmation_refusal(...)` in `tools/context.py`, and its module is off by
   default. The one exception is resolving (it can send a CSAT survey): `prepare_resolve_conversation` and

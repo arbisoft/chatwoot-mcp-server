@@ -2,6 +2,8 @@
 
 - The ``labels`` filter matches *any* of the labels.
 - A search (``q``) skips the status filter, so ``search_conversations`` applies the status itself.
+- Chatwoot pages chats itself (``CONVERSATION_RESULTS_PER_PAGE``, 25 by default), so each Chatwoot page is returned
+  whole: cutting it would leave the rest of the page unreachable.
 - Attachments come 100 per Chatwoot page; the tool splits each into pages of ``ATTACHMENTS_PER_PAGE``.
 """
 
@@ -22,8 +24,6 @@ from chatwoot_mcp.tools.context import (
     Page,
     ToolContext,
     as_dict,
-    limited,
-    page_info,
 )
 
 MODULE = "conversations"
@@ -72,11 +72,10 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
     def conversation_list(data: Any, page: int, *, status: str = "all") -> dict[str, Any]:
         body = as_dict(as_dict(data).get("data", data))
         rows = [c for c in Conversation.parse_rows(body) if status == "all" or c.status == status]
-        items, cut = limited(rows, context.max_items)
         return {
-            **page_info(page, cut, context.max_items),
+            "page": page,
             "counts": shape_report(body.get("meta")),
-            "conversations": [shape_conversation(c, context.links, max_chars=context.max_chars) for c in items],
+            "conversations": [shape_conversation(c, context.links, max_chars=context.max_chars) for c in rows],
         }
 
     @mcp.tool(**context.tool("List conversations", READ, module=MODULE, tier=Tier.AGENT))

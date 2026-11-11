@@ -49,7 +49,8 @@ NEW_CHAT_CONTACT_FIELD: dict[str, str | None] = {
     "Channel::TwilioSms": "phone_number",
 }
 # WhatsApp allows a free-form message only within 24 hours of the customer's last message, which a new chat lacks.
-NO_FIRST_MESSAGE_CHANNELS = frozenset({"Channel::Whatsapp"})
+# Twilio inboxes carry WhatsApp as ``medium``.
+NO_FIRST_MESSAGE_CHANNELS = frozenset({("Channel::Whatsapp", None), ("Channel::TwilioSms", "whatsapp")})
 
 InboxId = Annotated[int, Field(ge=1, description="The inbox to start the chat in. See list_inboxes.")]
 Content = Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS, description="The message text.")]
@@ -153,11 +154,24 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             return to_tool_error(error)
         if inbox.channel_type not in NEW_CHAT_CONTACT_FIELD:
             return f"Error: Chatwoot cannot start a chat in a {inbox.channel_type} inbox; pick another inbox"
-        if message and inbox.channel_type in NO_FIRST_MESSAGE_CHANNELS:
+        whatsapp = (inbox.channel_type, inbox.medium if inbox.channel_type == "Channel::TwilioSms" else None)
+        if message and whatsapp in NO_FIRST_MESSAGE_CHANNELS:
             return "Error: WhatsApp allows no free-form first message in a new chat; create it without a message"
         needed = NEW_CHAT_CONTACT_FIELD[inbox.channel_type]
         if needed is None and existing_source_id(contact_data, inbox_id) is None:
             return "Error: this customer has never written in through this inbox, so a new chat there cannot reach them"
+        if inbox.lock_to_single_conversation:
+            # Chatwoot then reuses the customer's last chat in the inbox instead of starting a new one.
+            try:
+                chats = Conversation.parse_rows(await session.get(f"/contacts/{contact_id}/conversations"))
+            except ChatwootError as error:
+                return to_tool_error(error)
+            existing = next((chat.id for chat in chats if chat.inbox_id == inbox_id), None)
+            if existing is not None:
+                return (
+                    f"Error: this inbox keeps one chat per customer, so Chatwoot would reuse chat {existing}; "
+                    "reply there with prepare_send_reply instead"
+                )
         if needed and not getattr(contact, needed):
             return f"Error: this inbox needs the contact's {needed.replace('_', ' ')}, and the contact has none"
         preview = compact(

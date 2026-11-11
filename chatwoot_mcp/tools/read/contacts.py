@@ -31,11 +31,11 @@ MODULE = "contacts"
 
 def register(mcp: FastMCP, context: ToolContext) -> None:
     def contact_list(data: Any, page: int) -> dict[str, Any]:
-        items, cut = limited(Contact.parse_rows(data), context.max_items)
+        # Chatwoot pages contacts itself (15 per page); a page is returned whole so none of it is unreachable.
         return {
-            **page_info(page, cut, context.max_items),
+            "page": page,
             "meta": shape_report(as_dict(data).get("meta")),
-            "contacts": [shape_contact(c, context.links) for c in items],
+            "contacts": [shape_contact(c, context.links) for c in Contact.parse_rows(data)],
         }
 
     @mcp.tool(**context.tool("Search contacts", READ, module=MODULE, tier=Tier.AGENT))

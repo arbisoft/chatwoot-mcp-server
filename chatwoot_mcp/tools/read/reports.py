@@ -17,7 +17,7 @@ from chatwoot_mcp.client import ChatwootError, to_tool_error
 from chatwoot_mcp.client.models import CsatResponse
 from chatwoot_mcp.shaping import shape_csat, shape_report
 from chatwoot_mcp.tiers import Tier
-from chatwoot_mcp.tools.context import READ, ChatwootSession, ToolContext, as_dict, limited, page_info, tier_error
+from chatwoot_mcp.tools.context import READ, ChatwootSession, Page, ToolContext, as_dict, limited, tier_error
 
 MODULE = "reports"
 MAX_DAYS = 366
@@ -144,7 +144,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         agent_id: Annotated[int | None, Field(ge=1, description="Only chats this agent handled.")] = None,
         inbox_id: Annotated[int | None, Field(ge=1, description="Only chats in this inbox.")] = None,
         team_id: Annotated[int | None, Field(ge=1, description="Only chats of this team.")] = None,
-        page: Annotated[int, Field(ge=1, description="Page number, starting at 1.")] = 1,
+        page: Page = 1,
     ) -> dict[str, Any] | str:
         """Read satisfaction-survey answers: the score and what the customer wrote, newest first. 25 per page."""
         try:
@@ -164,12 +164,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         try:
             session = await context.session()
             require_admin(session)
-            items, cut = limited(
-                CsatResponse.parse_rows(await session.get("/csat_survey_responses", params)), context.max_items
-            )
+            responses = CsatResponse.parse_rows(await session.get("/csat_survey_responses", params))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {
-            **page_info(page, cut, context.max_items),
-            "responses": [shape_csat(r, max_chars=context.max_chars) for r in items],
-        }
+        return {"page": page, "responses": [shape_csat(r, max_chars=context.max_chars) for r in responses]}

@@ -153,7 +153,7 @@ _FRAME = re.compile(r'^<untrusted_content source="[a-z_]+" id="[^"]*">\n?(.*?)\n
 def unframed(value: Any) -> Any:
     """Strip ``<untrusted_content>`` frames recursively, for comparing shaped output with plain values."""
     if isinstance(value, dict):
-        return {key: unframed(item) for key, item in value.items()}
+        return {unframed(key): unframed(item) for key, item in value.items()}
     if isinstance(value, list):
         return [unframed(item) for item in value]
     if isinstance(value, str):

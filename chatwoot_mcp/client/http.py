@@ -209,21 +209,43 @@ class ChatwootClient:
         params: Mapping[str, Any] | None = None,
         json: Any = None,
         retry_safe: bool | None = None,
+        refusal_expected: bool = False,
     ) -> Any:
         """Send one request and return its decoded JSON body (``None`` when empty).
 
         ``retry_safe`` overrides the method default, for read-only POSTs such as ``/conversations/filter``.
+        ``refusal_expected`` is for reads the caller falls back from on a role refusal: such a refusal is raised
+        without calling ``on_rejected``, so it never schedules a permission re-check. A rejected key still renews.
         """
-        response = await self._send(method, path, token=token, params=params, json=json, retry_safe=retry_safe)
+        response = await self._send(
+            method,
+            path,
+            token=token,
+            refusal_expected=refusal_expected,
+            params=params,
+            json=json,
+            retry_safe=retry_safe,
+        )
         return _json_body(response)
 
-    async def get(self, path: str, *, token: str | None, params: Mapping[str, Any] | None = None) -> Any:
-        return await self.request("GET", path, token=token, params=params)
+    async def get(
+        self,
+        path: str,
+        *,
+        token: str | None,
+        params: Mapping[str, Any] | None = None,
+        refusal_expected: bool = False,
+    ) -> Any:
+        return await self.request("GET", path, token=token, params=params, refusal_expected=refusal_expected)
 
-    async def _send(self, method: str, path: str, *, token: str | None, **options: Any) -> httpx.Response:
+    async def _send(
+        self, method: str, path: str, *, token: str | None, refusal_expected: bool = False, **options: Any
+    ) -> httpx.Response:
         try:
             return await self._attempt(method, path, token=token, **options)
         except (AuthError, PermissionDenied) as error:
+            if refusal_expected and isinstance(error, PermissionDenied):
+                raise
             try:
                 replacement = await self._on_rejected(error, token) if self._on_rejected and token else None
             except ChatwootError as renewal:

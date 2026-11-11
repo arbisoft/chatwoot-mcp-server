@@ -23,12 +23,14 @@ async def test_list_conversations_sends_the_filters_and_shapes_the_answer(settin
     assert unframed(out["conversations"][0]["contact"]) == {"id": 4, "name": "Sam"}
 
 
-async def test_a_list_longer_than_the_limit_says_it_was_cut(settings, fake):
+async def test_a_chatwoot_page_is_returned_whole_whatever_its_size(settings, fake):
+    # Chatwoot pages chats by CONVERSATION_RESULTS_PER_PAGE; cutting a page would leave its tail unreachable.
     import dataclasses
 
     fake.on("GET", "/conversations", json={"data": {"payload": [{"id": i} for i in range(1, 4)]}})
-    out = await data(dataclasses.replace(settings, max_items=2), fake, "list_conversations")
-    assert [c["id"] for c in out["conversations"]] == [1, 2] and "first 2" in out["truncated"]
+    out = await data(dataclasses.replace(settings, max_items=2), fake, "list_conversations", {"page": 2})
+    assert [c["id"] for c in out["conversations"]] == [1, 2, 3] and out["page"] == 2 and "truncated" not in out
+    assert fake.calls("GET", "/conversations")[-1].url.params["page"] == "2"
 
 
 async def test_search_uses_q(settings, fake):
@@ -256,3 +258,45 @@ async def test_every_attachment_is_reachable_25_at_a_time(settings, fake, page, 
     out = await data(settings, fake, "list_conversation_attachments", {"conversation_id": 12, "page": page})
     assert fake.calls("GET", "/conversations/12/attachments")[-1].url.params["page"] == str(chatwoot_page)
     assert out["attachments"][0]["id"] == first_id and out.get("next_page") == next_page
+
+
+async def test_a_resolve_that_times_out_says_it_may_have_happened(settings, fake):
+    from fastmcp import Client
+    from httpx import ReadTimeout
+
+    from chatwoot_mcp.server import build_server
+
+    def timeout(request):
+        raise ReadTimeout("slow", request=request)
+
+    fake.on("GET", "/conversations/12", json=RESOLVABLE)
+    fake.on("GET", "/inboxes/3", json={"id": 3, "csat_survey_enabled": True})
+    fake.on("POST", "/conversations/12/toggle_status", handler=timeout)
+    async with Client(build_server(settings, transport=fake)) as client:
+        token = (await client.call_tool("prepare_resolve_conversation", {"conversation_id": 12})).data[
+            "confirmation_token"
+        ]
+        done = await client.call_tool("resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
+    assert "may or may not have been carried out" in done.data
+
+
+async def test_an_expected_refusal_never_schedules_a_permission_recheck(settings, fake):
+    from chatwoot_mcp.client import ChatwootClient
+    from chatwoot_mcp.client.errors import PermissionDenied
+    from tests.conftest import BASE
+
+    seen = []
+
+    async def on_rejected(error, token):
+        seen.append(error)
+
+    refusal = {"error": "You are not authorized to do this action"}
+    fake.on("GET", "/inboxes/3", status=401, json=refusal)
+    client = ChatwootClient(BASE, transport=fake, on_rejected=on_rejected)
+    path = "/api/v1/accounts/5/inboxes/3"
+    with pytest.raises(PermissionDenied):
+        await client.get(path, token="k", refusal_expected=True)
+    assert seen == []
+    with pytest.raises(PermissionDenied):
+        await client.get(path, token="k")
+    assert len(seen) == 1

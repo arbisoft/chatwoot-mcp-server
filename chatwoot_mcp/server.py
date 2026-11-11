@@ -172,6 +172,11 @@ class BodyLimit:
         await self._app(scope, counted, send)
 
 
+def quiet_http_logs() -> None:
+    """httpx logs every full URL at INFO, and a customer search puts the customer's email or phone in the URL."""
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
 async def _warm(static: StaticCredentialProvider) -> None:
     """Best effort: a Chatwoot that is down or answers oddly must never stop the server starting."""
     try:

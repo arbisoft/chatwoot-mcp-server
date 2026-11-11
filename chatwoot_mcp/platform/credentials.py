@@ -26,7 +26,13 @@ from chatwoot_mcp.client.errors import (
 )
 from chatwoot_mcp.credentials import ChatwootCredential, Profile, ProfileMemo
 from chatwoot_mcp.platform.identity import Identity, current_identity, identity_for
-from chatwoot_mcp.platform.mint import MintedToken, TokenMinter
+from chatwoot_mcp.platform.mint import (
+    HandoffDeniedError,
+    MintedToken,
+    NotAMemberError,
+    SyntheticIdentityError,
+    TokenMinter,
+)
 from chatwoot_mcp.tiers import Tier, TierResolver
 
 logger = logging.getLogger(__name__)
@@ -64,7 +70,11 @@ class MintedCredentialProvider:
         return _credential(identity, await self._minter.token_for(identity))
 
     async def profile_for(self, identity: Identity) -> Profile:
-        minted = await self._minter.token_for(identity)
+        """The caller's tier; a real refusal is a known ``Tier.NONE``, any other failure raises (and is not cached)."""
+        try:
+            minted = await self._minter.token_for(identity)
+        except (HandoffDeniedError, NotAMemberError, SyntheticIdentityError):
+            return Profile(tier=Tier.NONE)
         return Profile(tier=minted.tier, permissions=minted.permissions)
 
     async def on_rejected(self, error: ChatwootAPIError, token: str) -> str | None:
@@ -88,7 +98,8 @@ def platform_tier_resolver(
     memo: ProfileMemo | None = None,
     identity_of: TokenIdentity = identity_for,
 ) -> TierResolver:
-    profiles = memo if memo is not None else ProfileMemo(ttl_seconds=TIER_MEMO_SECONDS)
+    # Only real answers are memoised; a passing failure (Valkey, 429, 5xx) hides tools for that one request only.
+    profiles = memo if memo is not None else ProfileMemo(ttl_seconds=TIER_MEMO_SECONDS, failure_ttl_seconds=0)
 
     async def resolve(token: AccessToken | None) -> Tier:
         try:

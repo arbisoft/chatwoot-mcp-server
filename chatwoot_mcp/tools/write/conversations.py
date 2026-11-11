@@ -40,6 +40,7 @@ from chatwoot_mcp.tools.context import (
     as_dict,
     confirmation_refusal,
     prepared,
+    send_failure,
 )
 
 MODULE = "conversations"
@@ -71,7 +72,7 @@ def snooze_seconds(status: str, snoozed_until: str | None) -> int | None:
 async def assignable_agent_ids(session: ChatwootSession, conversation_id: int) -> set[int]:
     chat = Conversation.parse(await session.get(f"/conversations/{conversation_id}"))
     try:
-        data = await session.get("/assignable_agents", {"inbox_ids": [chat.inbox_id]})
+        data = await session.get("/assignable_agents", {"inbox_ids": [chat.inbox_id]}, refusal_expected=True)
     except PermissionDenied:
         data = await session.get("/agents")
     return {agent.id for agent in Agent.parse_rows(data)}
@@ -153,7 +154,11 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         except ChatwootError as error:
             return to_tool_error(error)
         try:
-            inbox = Inbox.parse(await session.get(f"/inboxes/{chat.inbox_id}")) if chat.inbox_id else None
+            inbox = (
+                Inbox.parse(await session.get(f"/inboxes/{chat.inbox_id}", refusal_expected=True))
+                if chat.inbox_id
+                else None
+            )
             survey_warning = (
                 "The customer will be sent a satisfaction survey." if inbox and inbox.csat_survey_enabled else None
             )
@@ -196,7 +201,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             path = f"/conversations/{conversation_id}/toggle_status"
             done = payload(await session.post(path, {"status": "resolved"}))
         except ChatwootError as error:
-            return to_tool_error(error)
+            # Resolving can send the customer a satisfaction survey, so say whether it may have happened.
+            return send_failure(error, "request to resolve the chat", done="carried out")
         return {"conversation_id": conversation_id, "status": done.get("current_status", "resolved")}
 
     @mcp.tool(**context.tool("Set conversation priority", OVERWRITE, module=MODULE, tier=Tier.AGENT))

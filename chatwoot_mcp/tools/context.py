@@ -48,8 +48,13 @@ class ChatwootSession:
     def _path(self, path: str, version: int) -> str:
         return f"/api/v{version}/accounts/{self.account_id}{path}"
 
-    async def get(self, path: str, params: Mapping[str, Any] | None = None, *, version: int = 1) -> Any:
-        return await self.client.get(self._path(path, version), token=self.credential.token, params=params)
+    async def get(
+        self, path: str, params: Mapping[str, Any] | None = None, *, version: int = 1, refusal_expected: bool = False
+    ) -> Any:
+        """``refusal_expected``: the caller falls back on a role refusal, so it must not schedule a re-check."""
+        return await self.client.get(
+            self._path(path, version), token=self.credential.token, params=params, refusal_expected=refusal_expected
+        )
 
     async def search(self, path: str, body: Mapping[str, Any]) -> Any:
         """A read-only POST, such as ``/conversations/filter``: safe to retry."""

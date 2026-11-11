@@ -59,7 +59,7 @@ from chatwoot_mcp.platform.storage import (
     fernet_for,
     parse_storage_url,
 )
-from chatwoot_mcp.server import MCP_PATH, BodyLimit, build_server, healthz
+from chatwoot_mcp.server import MCP_PATH, BodyLimit, build_server, healthz, quiet_http_logs
 
 if TYPE_CHECKING:
     from key_value.aio.protocols.key_value import AsyncKeyValue
@@ -264,6 +264,7 @@ def configure_logging(level: str) -> None:
         target.setLevel(level)
         target.propagate = False
     logging.getLogger(AUDIT_LOGGER).setLevel(logging.INFO)
+    quiet_http_logs()
 
 
 def _log_startup(settings: Settings, platform: PlatformSettings) -> None:

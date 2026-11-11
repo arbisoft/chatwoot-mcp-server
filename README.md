@@ -42,7 +42,7 @@ Claude Code (`.mcp.json`) or Claude Desktop:
   "mcpServers": {
     "chatwoot": {
       "command": "uv",
-      "args": ["--directory", "/path/to/chatwoot-mcp", "run", "chatwoot-mcp", "stdio"],
+      "args": ["--directory", "/path/to/chatwoot-mcp-server", "run", "chatwoot-mcp", "stdio"],
       "env": { "CHATWOOT_URL": "https://chat.example.com", "CHATWOOT_ACCOUNT_ID": "1", "CHATWOOT_HTTP_TOKEN": "..." }
     }
   }
@@ -72,7 +72,7 @@ Settings are read once at start-up; a bad value stops the server with a plain me
 | `CHATWOOT_ENABLE_<MODULE>` | on, except `REPLIES` and `MACROS` | Turn a tool module on or off (see the `module` column below) |
 | `CHATWOOT_FILTER_TOOLS_BY_ROLE` | `false` | HTTP only: hide tools the key's role cannot use (reports for agents). Over stdio every tool is listed and refuses when called. Platform mode always filters |
 | `CHATWOOT_CONFIRM_TTL_SECONDS` | `600` | How long a confirmation token from a `prepare_*` tool stays valid |
-| `CHATWOOT_MAX_ITEMS` | `25` | Most items a list returns; at least 25 (Chatwoot sends chats 25 per page, so a smaller limit would hide the rest of each page), else start-up stops |
+| `CHATWOOT_MAX_ITEMS` | `25` | Page size for lists Chatwoot returns whole (agents, labels, notes, macros, ...) and the cut for a chat's messages. Lists Chatwoot pages itself (chats, contacts, survey answers, articles) come a whole Chatwoot page at a time |
 | `CHATWOOT_MAX_TEXT_CHARS` | `2000` | Characters of message, note or article text kept |
 | `CHATWOOT_TIMEOUT_SECONDS` / `CHATWOOT_CONNECT_TIMEOUT_SECONDS` | `30` / `10` | Chatwoot timeouts |
 | `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE` | `false` | Serve `/mcp` with `CHATWOOT_HTTP_TOKEN` in http mode |

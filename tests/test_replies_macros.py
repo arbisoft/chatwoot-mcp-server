@@ -233,3 +233,24 @@ async def test_a_step_not_known_to_stay_inside_gets_a_warning(everything, fake, 
         everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
     )
     assert "cannot be undone" in preview["preview"]["warning"]
+
+
+async def test_a_twilio_whatsapp_first_message_gets_no_token(everything, fake):
+    fake.on("GET", "/contacts/4", json={"payload": {"id": 4, "phone_number": "+15550100"}})
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::TwilioSms", "medium": "whatsapp"})
+    arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hi"}
+    preview, _, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    assert "WhatsApp" in preview and fake.writes() == []
+
+
+async def test_an_inbox_with_one_chat_per_customer_points_to_the_existing_chat(everything, fake):
+    # Chatwoot's ConversationBuilder would reuse conversations.last instead of starting the promised new chat.
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api", "lock_to_single_conversation": True})
+    fake.on(
+        "GET", "/contacts/4/conversations", json={"payload": [{"id": 31, "inbox_id": 8}, {"id": 30, "inbox_id": 2}]}
+    )
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {"contact_id": 4, "inbox_id": 8}
+    )
+    assert "reuse chat 31" in preview and fake.writes() == []

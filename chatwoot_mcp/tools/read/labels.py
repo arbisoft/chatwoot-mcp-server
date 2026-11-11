@@ -1,5 +1,6 @@
-"""Labels, read: the labels on a chat or a customer. Any agent or API client can attach free text as a label, so a
-label without a plain label's shape is framed as untrusted (``shaping.shape_labels``).
+"""Labels, read: the labels on a chat or a customer. Any agent or API client can attach free text as a label, so
+every label is framed as untrusted (``shaping.shape_labels``). ``list_labels`` lists the account's label
+definitions, which administrators write, as they are.
 """
 
 from __future__ import annotations
