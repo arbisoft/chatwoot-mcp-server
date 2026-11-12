@@ -184,3 +184,11 @@ def test_notes_and_survey_feedback_are_framed():
 
 def test_rows_reads_both_list_shapes():
     assert rows([1]) == [1] and rows({"payload": [2]}) == [2] and rows({"payload": {}}) == [] and rows(None) == []
+
+
+@pytest.mark.parametrize("labels", ["vip", None, {"0": "vip"}, 3])
+def test_labels_that_are_not_a_list_are_no_labels(labels):
+    # A bare string would otherwise be framed one character at a time.
+    from chatwoot_mcp.shaping import shape_labels
+
+    assert shape_labels(labels, source="s", item_id=1) == []

@@ -139,7 +139,13 @@ class Confirmations:
         raw = await self._backend.take(key) if token else None
         if raw is None:
             raise ConfirmationError("confirmation token is unknown, already used or expired; prepare the action again")
-        record = _Record(**json.loads(raw))
+        try:
+            record = _Record(**json.loads(raw))
+        except (ValueError, TypeError):
+            # Not a record this server wrote (or an older format): the token is as good as unknown.
+            raise ConfirmationError(
+                "confirmation token is unknown, already used or expired; prepare the action again"
+            ) from None
         self._release(record.identity, key)
         if record.expires_at <= self._clock():
             raise ConfirmationError("confirmation token expired; prepare the action again")

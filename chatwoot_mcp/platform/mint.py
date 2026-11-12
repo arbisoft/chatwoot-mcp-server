@@ -199,7 +199,7 @@ class TokenCache:
             return None
         try:
             return MintedToken.from_json(self._fernet.decrypt(raw.encode()).decode())
-        except (InvalidToken, ValueError, KeyError):
+        except (InvalidToken, ValueError, KeyError, TypeError):
             # A rotated secret or an old format: treat as absent and fetch again.
             return None
 

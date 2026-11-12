@@ -300,3 +300,40 @@ async def test_an_expected_refusal_never_schedules_a_permission_recheck(settings
     with pytest.raises(PermissionDenied):
         await client.get(path, token="k")
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        ({"payload": {}}, "could not be read"),
+        ({"payload": {"current_status": "open"}}, "left the chat open, not pending"),
+    ],
+)
+async def test_a_status_change_is_reported_only_when_chatwoot_confirms_it(settings, fake, answer, message):
+    fake.on("POST", "/conversations/12/toggle_status", json=answer)
+    out = await data(settings, fake, "set_conversation_status", {"conversation_id": 12, "status": "pending"})
+    assert message in out
+
+
+async def test_custom_fields_missing_from_the_answer_are_not_reported_as_saved(settings, fake):
+    fake.on("GET", "/custom_attribute_definitions", json=[{"id": 1, "attribute_key": "order"}])
+    fake.on("GET", "/conversations/12", json={"id": 12})
+    fake.on("POST", "/conversations/12/custom_attributes", json={})
+    out = await data(
+        settings, fake, "set_conversation_custom_attributes", {"conversation_id": 12, "attributes": {"order": "B2"}}
+    )
+    assert "could not be read" in out
+
+
+async def test_an_unexpected_failure_reaches_the_model_without_internal_details(settings, fake):
+    from fastmcp import Client
+
+    from chatwoot_mcp.server import build_server
+
+    def leak(_request):
+        raise RuntimeError("internal detail: redis://secret-host:6379")
+
+    fake.on("GET", "/conversations/12", handler=leak)
+    async with Client(build_server(settings, transport=fake)) as client:
+        result = await client.call_tool("get_conversation", {"conversation_id": 12}, raise_on_error=False)
+    assert result.is_error and "secret-host" not in result.content[0].text

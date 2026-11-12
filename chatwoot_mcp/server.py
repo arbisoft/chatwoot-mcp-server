@@ -110,7 +110,9 @@ def build_server(
             confirmation_backend or MemoryConfirmationBackend(), ttl_seconds=settings.confirm_ttl_seconds
         ),
     )
-    mcp = FastMCP(SERVER_NAME, instructions=INSTRUCTIONS, lifespan=lifespan, auth=auth)
+    # An exception no tool turned into an "Error: ..." string is logged here and reaches the client only as a generic
+    # message, so internal hosts or stack details never reach the model. ToolError messages still pass.
+    mcp = FastMCP(SERVER_NAME, instructions=INSTRUCTIONS, lifespan=lifespan, auth=auth, mask_error_details=True)
     mcp.add_middleware(ArgumentBoundary())
     register_tools(mcp, context, settings)
     return mcp

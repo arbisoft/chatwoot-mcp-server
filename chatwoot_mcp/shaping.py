@@ -72,7 +72,10 @@ def untrusted_field(text: Any, *, source: str, item_id: int | str | None) -> str
     return f'<{UNTRUSTED_TAG} source="{source}" id="{item_id}">{escape_untrusted(str(text))}</{UNTRUSTED_TAG}>'
 
 
-def shape_labels(labels: list[Any], *, source: str, item_id: int | str | None) -> list[str]:
+def shape_labels(labels: Any, *, source: str, item_id: int | str | None) -> list[str]:
+    """Only a list of strings is read; anything else (a bare string would iterate by character) is no labels."""
+    if not isinstance(labels, list):
+        return []
     return [
         untrusted_field(label, source=source, item_id=item_id) for label in labels if isinstance(label, str) and label
     ]

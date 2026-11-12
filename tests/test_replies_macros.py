@@ -279,3 +279,13 @@ async def test_a_client_that_can_prompt_asks_the_person_before_anything_is_sent(
     assert len(prompts) == 1 and "send reply" in prompts[0] and "Hi Sam" in prompts[0]
     assert bool(fake.calls("POST", "/conversations/12/messages")) is sent
     assert (done.get("id") == 70) if sent else ("did not approve" in done)
+
+
+async def test_a_created_chat_whose_answer_cannot_be_read_says_it_was_created(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api"})
+    fake.on("POST", "/conversations", json={"status": "open"})
+    _, created, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {"contact_id": 4, "inbox_id": 8}
+    )
+    assert "so it was created, but its answer could not be read" in created

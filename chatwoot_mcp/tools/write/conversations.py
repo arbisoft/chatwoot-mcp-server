@@ -79,6 +79,16 @@ async def assignable_agent_ids(session: ChatwootSession, conversation_id: int) -
     return {agent.id for agent in Agent.parse_rows(data)}
 
 
+def status_problem(done: dict[str, Any], wanted: str) -> str | None:
+    """A status change is reported only when Chatwoot's answer says the chat is now in that status."""
+    current = done.get("current_status")
+    if current is None:
+        return f"Error: Chatwoot accepted the change to {wanted}, but its answer could not be read; check the chat"
+    if current != wanted:
+        return f"Error: Chatwoot left the chat {current}, not {wanted}"
+    return None
+
+
 def register(mcp: FastMCP, context: ToolContext) -> None:
     @mcp.tool(**context.tool("Assign conversation", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def assign_conversation(
@@ -138,11 +148,10 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             done = payload(await session.post(f"/conversations/{conversation_id}/toggle_status", body))
         except ChatwootError as error:
             return to_tool_error(error)
-        return {
-            "conversation_id": conversation_id,
-            "status": done.get("current_status", status),
-            "snoozed_until": done.get("snoozed_until"),
-        }
+        problem = status_problem(done, status)
+        if problem:
+            return problem
+        return {"conversation_id": conversation_id, "status": status, "snoozed_until": done.get("snoozed_until")}
 
     @mcp.tool(**context.tool("Prepare to resolve conversation", PREPARE, module=MODULE, tier=Tier.AGENT))
     async def prepare_resolve_conversation(conversation_id: ConversationId) -> dict[str, Any] | str:
@@ -208,7 +217,7 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         except ChatwootError as error:
             # Resolving can send the customer a satisfaction survey, so say whether it may have happened.
             return send_failure(error, "request to resolve the chat", done="carried out")
-        return {"conversation_id": conversation_id, "status": done.get("current_status", "resolved")}
+        return status_problem(done, "resolved") or {"conversation_id": conversation_id, "status": "resolved"}
 
     @mcp.tool(**context.tool("Set conversation priority", OVERWRITE, module=MODULE, tier=Tier.AGENT))
     async def set_conversation_priority(
@@ -259,6 +268,8 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
             saved = as_dict(await session.post(f"/conversations/{conversation_id}/custom_attributes", body))
         except ChatwootError as error:
             return to_tool_error(error)
+        if not isinstance(saved.get("custom_attributes"), dict):
+            return "Error: Chatwoot accepted the fields, but its answer could not be read; check the chat"
         return {
             "conversation_id": conversation_id,
             "custom_attributes": shape_attributes(

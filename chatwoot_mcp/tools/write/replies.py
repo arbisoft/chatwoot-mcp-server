@@ -220,20 +220,19 @@ def register(mcp: FastMCP, context: ToolContext) -> None:
         if source_id is not None:
             body["source_id"] = source_id
         try:
-            created = as_dict(await session.post("/conversations", body))
+            created = Conversation.parse(await session.post("/conversations", body))
         except ChatwootError as error:
-            return send_failure(error, "new conversation")
-        conversation_id = created.get("id")
-        if message and created.get("can_reply") is False:
+            return send_failure(error, "new conversation", done="created")
+        if message and created.can_reply is False:
             return (
-                f"Error: chat {conversation_id} was created, but the customer cannot be messaged in this channel right "
+                f"Error: chat {created.id} was created, but the customer cannot be messaged in this channel right "
                 "now, so the first message was not delivered"
             )
         return compact(
             {
-                "conversation_id": conversation_id,
-                "status": created.get("status"),
-                "inbox_id": created.get("inbox_id"),
-                "url": context.links.conversation(conversation_id) if isinstance(conversation_id, int) else None,
+                "conversation_id": created.id,
+                "status": created.status,
+                "inbox_id": created.inbox_id,
+                "url": context.links.conversation(created.id),
             }
         )

@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -121,3 +122,11 @@ async def test_tokens_spent_on_another_replica_free_the_limit(backend, clock):
         await first.issue(identity="ada", action="send_reply", payload=PAYLOAD)
     with pytest.raises(ConfirmationLimitError):
         await first.issue(identity="ada", action="send_reply", payload=PAYLOAD)
+
+
+@pytest.mark.parametrize("raw", ["not json", "[]", '{"identity": "ada"}'])
+async def test_a_malformed_record_reads_as_an_unknown_token_not_a_store_outage(confirmations, backend, raw):
+    token = await confirmations.issue(identity="ada", action="send_reply", payload=PAYLOAD)
+    await backend.put(KEY_PREFIX + hashlib.sha256(token.encode()).hexdigest(), raw, 60)
+    with pytest.raises(ConfirmationError, match="unknown"):
+        await confirmations.consume(token, identity="ada", action="send_reply", payload=PAYLOAD)
