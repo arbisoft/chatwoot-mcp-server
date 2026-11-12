@@ -173,7 +173,13 @@ async def tools(settings: Settings, fake: httpx.AsyncBaseTransport) -> dict[str,
 
 async def call(settings: Settings, fake: httpx.AsyncBaseTransport, name: str, arguments: dict[str, Any] | None = None):
     async with Client(build_server(settings, transport=fake)) as client:
-        return await client.call_tool(name, arguments or {})
+        return await client.call_tool(name, arguments or {}, raise_on_error=False)
+
+
+async def outcome(client: Client, name: str, arguments: dict[str, Any] | None = None) -> Any:
+    """A tool's structured result, or its ``Error: ...`` text (which MCP marks with ``isError``)."""
+    result = await client.call_tool(name, arguments or {}, raise_on_error=False)
+    return result.content[0].text if result.is_error or result.data is None else result.data
 
 
 async def data(
@@ -181,9 +187,7 @@ async def data(
 ) -> Any:
     """The tool's structured result, or its ``Error: ...`` string."""
     result = await call(settings, fake, name, arguments)
-    if result.data is not None:
-        return result.data
-    return result.content[0].text
+    return result.content[0].text if result.is_error or result.data is None else result.data
 
 
 @dataclass

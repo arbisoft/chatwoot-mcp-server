@@ -31,6 +31,8 @@ def test_every_value_is_read():
             "CHATWOOT_FILTER_TOOLS_BY_ROLE": "1",
             "CHATWOOT_CONFIRM_TTL_SECONDS": "60",
             "CHATWOOT_MAX_ITEMS": "30",
+            "CHATWOOT_MAX_RETRIES": "0",
+            "CHATWOOT_TOOL_TIMEOUT_SECONDS": "45",
             "CHATWOOT_MAX_TEXT_CHARS": "50",
             "CHATWOOT_TIMEOUT_SECONDS": "2.5",
             "CHATWOOT_CONNECT_TIMEOUT_SECONDS": "1",
@@ -45,6 +47,7 @@ def test_every_value_is_read():
     assert settings.read_only and settings.filter_tools_by_role and settings.http_shared_token_route
     assert (settings.confirm_ttl_seconds, settings.max_items, settings.max_text_chars) == (60, 30, 50)
     assert (settings.timeout_seconds, settings.connect_timeout_seconds) == (2.5, 1.0)
+    assert (settings.max_retries, settings.tool_timeout_seconds) == (0, 45.0)
     assert (settings.http_host, settings.http_port) == ("0.0.0.0", 9000)
     assert settings.module_enabled("replies") and not settings.module_enabled("reports")
 
@@ -59,6 +62,9 @@ def test_every_value_is_read():
         ({"CHATWOOT_ACCOUNT_ID": "0"}, "CHATWOOT_ACCOUNT_ID"),
         ({"CHATWOOT_ACCOUNT_ID": "1.5"}, "CHATWOOT_ACCOUNT_ID"),
         ({"CHATWOOT_MAX_ITEMS": "-1"}, "CHATWOOT_MAX_ITEMS"),
+        ({"CHATWOOT_MAX_RETRIES": "9"}, "from 0 to 5"),
+        ({"CHATWOOT_MAX_RETRIES": "-1"}, "CHATWOOT_MAX_RETRIES"),
+        ({"CHATWOOT_TOOL_TIMEOUT_SECONDS": "0"}, "CHATWOOT_TOOL_TIMEOUT_SECONDS"),
         ({"CHATWOOT_TIMEOUT_SECONDS": "nan"}, "CHATWOOT_TIMEOUT_SECONDS"),
         ({"CHATWOOT_TIMEOUT_SECONDS": "soon"}, "not a number"),
         ({"MCP_HTTP_PORT": "70000"}, "MCP_HTTP_PORT"),

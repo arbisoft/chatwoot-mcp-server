@@ -75,6 +75,8 @@ Settings are read once at start-up; a bad value stops the server with a plain me
 | `CHATWOOT_MAX_ITEMS` | `25` | Page size for lists Chatwoot returns whole (agents, labels, notes, macros, ...) and the cut for a chat's messages. Lists Chatwoot pages itself (chats, contacts, survey answers, articles) come a whole Chatwoot page at a time |
 | `CHATWOOT_MAX_TEXT_CHARS` | `2000` | Characters of message, note or article text kept |
 | `CHATWOOT_TIMEOUT_SECONDS` / `CHATWOOT_CONNECT_TIMEOUT_SECONDS` | `30` / `10` | Chatwoot timeouts |
+| `CHATWOOT_MAX_RETRIES` | `2` | Retries for a request Chatwoot may not have processed (0 to 5); a POST is retried only when it never left |
+| `CHATWOOT_TOOL_TIMEOUT_SECONDS` | `60` | A read-only tool still running after this is stopped and reported as too slow; writes are never cut short |
 | `CHATWOOT_HTTP_SHARED_TOKEN_ROUTE` | `false` | Serve `/mcp` with `CHATWOOT_HTTP_TOKEN` in http mode |
 | `MCP_HTTP_HOST` / `MCP_HTTP_PORT` | `127.0.0.1` / `8215` | Where http mode listens (the Docker image sets `0.0.0.0`) |
 | `MCP_LOG_LEVEL` | `INFO` | Logs go to stderr; request URLs are never logged |

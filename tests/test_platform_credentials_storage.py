@@ -25,7 +25,7 @@ from chatwoot_mcp.platform.storage import (
 )
 from chatwoot_mcp.server import build_server
 from chatwoot_mcp.tiers import Tier
-from tests.conftest import ACCOUNT_ID, BASE, FakeSsoChatwoot
+from tests.conftest import ACCOUNT_ID, BASE, FakeSsoChatwoot, outcome
 
 ADA = Identity(email="ada@example.com")
 
@@ -105,7 +105,7 @@ async def test_a_signed_in_users_tool_calls_run_with_their_own_key_end_to_end(se
         credentials=provider,
     )
     async with Client(server) as client:
-        me = (await client.call_tool("get_me", {})).data
+        me = await outcome(client, "get_me", {})
     assert me["tier"] == "agent"
     assert chatwoot.users["ada@example.com"].key in calls and settings.http_token not in calls
 

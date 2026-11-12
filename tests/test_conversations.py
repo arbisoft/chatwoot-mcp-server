@@ -3,7 +3,7 @@ import json
 import pytest
 
 from chatwoot_mcp.tools.write.conversations import snooze_seconds
-from tests.conftest import data, unframed
+from tests.conftest import data, outcome, unframed
 
 CHAT = {
     "id": 12,
@@ -209,13 +209,13 @@ async def test_resolving_is_previewed_with_the_survey_warning_then_done_once(set
     fake.on("GET", "/inboxes/3", json={"id": 3, "name": "Web", "csat_survey_enabled": survey})
     fake.on("POST", "/conversations/12/toggle_status", json={"payload": {"current_status": "resolved"}})
     async with Client(build_server(settings, transport=fake)) as client:
-        first = (await client.call_tool("prepare_resolve_conversation", {"conversation_id": 12})).data
+        first = await outcome(client, "prepare_resolve_conversation", {"conversation_id": 12})
         assert fake.writes() == []
         token = first["confirmation_token"]
-        done = await client.call_tool("resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
-        again = await client.call_tool("resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
+        done = await outcome(client, "resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
+        again = await outcome(client, "resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
     assert ("satisfaction survey" in first["preview"].get("warning", "")) is warned
-    assert done.data == {"conversation_id": 12, "status": "resolved"} and "already used" in again.data
+    assert done == {"conversation_id": 12, "status": "resolved"} and "already used" in again
     assert fake.last_json("POST", "/conversations/12/toggle_status") == {"status": "resolved"}
     assert len(fake.calls("POST", "/conversations/12/toggle_status")) == 1
 
@@ -230,10 +230,8 @@ async def test_a_team_member_who_cannot_read_the_inbox_can_still_resolve(setting
 async def test_a_resolved_chat_is_not_prepared_again_and_status_cannot_resolve(settings, fake):
     fake.on("GET", "/conversations/12", json={**RESOLVABLE, "status": "resolved"})
     assert "already resolved" in await data(settings, fake, "prepare_resolve_conversation", {"conversation_id": 12})
-    from fastmcp.exceptions import ToolError
-
-    with pytest.raises(ToolError, match="literal_error|Input should be"):
-        await data(settings, fake, "set_conversation_status", {"conversation_id": 12, "status": "resolved"})
+    refused = await data(settings, fake, "set_conversation_status", {"conversation_id": 12, "status": "resolved"})
+    assert "Input should be" in refused
     assert fake.writes() == []
 
 
@@ -273,11 +271,9 @@ async def test_a_resolve_that_times_out_says_it_may_have_happened(settings, fake
     fake.on("GET", "/inboxes/3", json={"id": 3, "csat_survey_enabled": True})
     fake.on("POST", "/conversations/12/toggle_status", handler=timeout)
     async with Client(build_server(settings, transport=fake)) as client:
-        token = (await client.call_tool("prepare_resolve_conversation", {"conversation_id": 12})).data[
-            "confirmation_token"
-        ]
-        done = await client.call_tool("resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
-    assert "may or may not have been carried out" in done.data
+        token = (await outcome(client, "prepare_resolve_conversation", {"conversation_id": 12}))["confirmation_token"]
+        done = await outcome(client, "resolve_conversation", {"conversation_id": 12, "confirmation_token": token})
+    assert "may or may not have been carried out" in done
 
 
 async def test_an_expected_refusal_never_schedules_a_permission_recheck(settings, fake):

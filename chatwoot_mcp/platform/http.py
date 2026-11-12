@@ -40,6 +40,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount, Route
 
 from chatwoot_mcp.client import ChatwootClient
+from chatwoot_mcp.client.http import RetryPolicy
 from chatwoot_mcp.config import ConfigError, Settings
 from chatwoot_mcp.confirmations import ConfirmationBackend
 from chatwoot_mcp.credentials import API_KEY_MOUNT_PATH, api_key_mount
@@ -138,6 +139,7 @@ def build_platform_server(
         timeout_seconds=settings.timeout_seconds,
         connect_timeout_seconds=settings.connect_timeout_seconds,
         transport=transport,
+        retry=RetryPolicy(max_retries=settings.max_retries),
         on_rejected=credentials.on_rejected,
     )
     mcp = build_server(

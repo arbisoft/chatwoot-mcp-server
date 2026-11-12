@@ -60,6 +60,7 @@ docker build --platform linux/amd64 .
   `ToolAnnotations` hints, the `tier:*`, `module:*` and read/write tags and the tier check. `tests/test_tools.py`
   enforces it.
 - Tools return an `Error: ...` string instead of raising: catch `ChatwootError` and return `to_tool_error(error)`.
+  `server.ToolOutcome` marks such a result as an MCP error (`isError`) and logs it, so do not mark or log it again.
 - Validate responses with `Model.parse(...)` / `parse_rows(...)` inside the tool's `try`, so an odd payload becomes an
   `Error:` string. Shape the result in `shaping.py`; never return Chatwoot's raw payload.
 - Text a customer, visitor or user wrote is untrusted: return it through `shaping.untrusted_field` or

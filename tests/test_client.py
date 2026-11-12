@@ -23,6 +23,7 @@ from chatwoot_mcp.client.errors import (
     error_for_status,
 )
 from chatwoot_mcp.client.http import (
+    RetryPolicy,
     accepted_but_unreadable,
     never_sent,
     outcome_unknown,
@@ -268,3 +269,40 @@ async def test_a_failed_key_renewal_says_the_request_did_nothing():
         await client.request("POST", "/conversations/1/messages", token=KEY, json={"content": "hi"})
     assert never_sent(raised.value) and "server error" in str(raised.value)
     assert "nothing was sent" in send_failure(raised.value, "reply") and len(transport.requests) == 1
+
+
+async def test_retries_run_out_after_the_configured_attempts():
+    client, transport = client_for(lambda r: httpx.Response(502, json={}))
+    with pytest.raises(ServerError):
+        await client.get("/x", token=KEY)
+    assert len(transport.requests) == 3  # the first try and two retries
+
+    client, transport = client_for(lambda r: httpx.Response(502, json={}), retry=RetryPolicy(max_retries=0))
+    with pytest.raises(ServerError):
+        await client.get("/x", token=KEY)
+    assert len(transport.requests) == 1
+
+
+async def test_a_second_429_is_reported_not_retried_again():
+    client, transport = client_for(lambda r: httpx.Response(429, json={}, headers={"retry-after": "1"}))
+    with pytest.raises(RateLimitedError):
+        await client.request("POST", "/messages", token=KEY, json={})
+    assert len(transport.requests) == 2
+
+
+async def test_a_cancelled_request_is_cancelled_not_turned_into_an_error():
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def slow(request):
+        started.set()
+        await asyncio.sleep(10)
+        return httpx.Response(200, json={})
+
+    client = ChatwootClient(BASE, transport=httpx.MockTransport(slow))
+    task = asyncio.create_task(client.get("/x", token=KEY))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

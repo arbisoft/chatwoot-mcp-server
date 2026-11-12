@@ -35,6 +35,10 @@ DEFAULT_OFF_MODULES = frozenset({"replies", "macros"})
 DEFAULT_ENABLED_MODULES = frozenset(TOOL_MODULES) - DEFAULT_OFF_MODULES
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
+DEFAULT_MAX_RETRIES = 2
+MAX_RETRIES_LIMIT = 5
+# A read-only tool still running after this is reported as too slow, before the MCP client gives up on it.
+DEFAULT_TOOL_TIMEOUT_SECONDS = 60.0
 URL_PATTERN = re.compile(r"https?://[^\s/]+(/\S*)?")
 
 
@@ -83,6 +87,8 @@ class Settings:
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS
     enabled_modules: frozenset[str] = DEFAULT_ENABLED_MODULES
     http_shared_token_route: bool = False
+    max_retries: int = DEFAULT_MAX_RETRIES
+    tool_timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
 
     @property
     def browser_url(self) -> str:
@@ -133,6 +139,8 @@ class Settings:
                 if env_flag(module_flag(module), default=module in DEFAULT_ENABLED_MODULES, environ=env)
             ),
             http_shared_token_route=env_flag("CHATWOOT_HTTP_SHARED_TOKEN_ROUTE", environ=env),
+            max_retries=_retries(env),
+            tool_timeout_seconds=_positive_float(env, "CHATWOOT_TOOL_TIMEOUT_SECONDS", DEFAULT_TOOL_TIMEOUT_SECONDS),
         )
 
 
@@ -155,6 +163,15 @@ def _positive_float(env: Mapping[str, str], name: str, default: float) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ConfigError(f"{name} must be a finite number greater than zero")
     return value
+
+
+def _retries(env: Mapping[str, str]) -> int:
+    raw = read_setting(env, "CHATWOOT_MAX_RETRIES")
+    if not raw:
+        return DEFAULT_MAX_RETRIES
+    if not (raw.isascii() and raw.isdigit()) or int(raw) > MAX_RETRIES_LIMIT:
+        raise ConfigError(f"CHATWOOT_MAX_RETRIES={raw!r} must be a whole number from 0 to {MAX_RETRIES_LIMIT}")
+    return int(raw)
 
 
 def positive_int_setting(env: Mapping[str, str], name: str, default: int) -> int:

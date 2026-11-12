@@ -6,7 +6,7 @@ from fastmcp.client.elicitation import ElicitResult
 from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError, UnexpectedResponseError
 from chatwoot_mcp.server import build_server
 from chatwoot_mcp.tools.context import send_failure
-from tests.conftest import FakeChatwoot, unframed
+from tests.conftest import FakeChatwoot, outcome, unframed
 
 CHAT = {"id": 12, "can_reply": True, "meta": {"channel": "Channel::Email", "sender": {"id": 4, "name": "Sam"}}}
 REPLY = {"conversation_id": 12, "content": "Hi Sam"}
@@ -15,12 +15,12 @@ REPLY = {"conversation_id": 12, "content": "Hi Sam"}
 async def two_steps(settings, fake, prepare, confirm, arguments, *, change=None):
     """Prepare, then confirm in the same server, as an assistant would; returns (preview, result, reuse)."""
     async with Client(build_server(settings, transport=fake)) as client:
-        first = (await client.call_tool(prepare, arguments)).data
+        first = await outcome(client, prepare, arguments)
         if not isinstance(first, dict):
             return first, None, None
         token = first["confirmation_token"]
-        done = (await client.call_tool(confirm, {**arguments, **(change or {}), "confirmation_token": token})).data
-        again = (await client.call_tool(confirm, {**arguments, "confirmation_token": token})).data
+        done = await outcome(client, confirm, {**arguments, **(change or {}), "confirmation_token": token})
+        again = await outcome(client, confirm, {**arguments, "confirmation_token": token})
     return first, done, again
 
 
@@ -191,7 +191,7 @@ async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything
     )
     assert "warning" not in preview["preview"]
     async with Client(build_server(everything, transport=fake)) as client:
-        listed = (await client.call_tool("list_macros", {})).data
+        listed = await outcome(client, "list_macros", {})
     assert listed == {
         "page": 1,
         "macros": [
@@ -274,8 +274,8 @@ async def test_a_client_that_can_prompt_asks_the_person_before_anything_is_sent(
         return answer if isinstance(answer, ElicitResult) else {"value": answer}
 
     async with Client(build_server(everything, transport=fake), elicitation_handler=handler) as client:
-        token = (await client.call_tool("prepare_send_reply", REPLY)).data["confirmation_token"]
-        done = (await client.call_tool("send_reply", {**REPLY, "confirmation_token": token})).data
+        token = (await outcome(client, "prepare_send_reply", REPLY))["confirmation_token"]
+        done = await outcome(client, "send_reply", {**REPLY, "confirmation_token": token})
     assert len(prompts) == 1 and "send reply" in prompts[0] and "Hi Sam" in prompts[0]
     assert bool(fake.calls("POST", "/conversations/12/messages")) is sent
     assert (done.get("id") == 70) if sent else ("did not approve" in done)

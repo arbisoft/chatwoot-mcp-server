@@ -231,3 +231,26 @@ async def test_a_store_outage_while_reading_refusals_is_a_cache_error(clock):
 
     with pytest.raises(TokenCacheError):
         await minter_for(FakeSsoChatwoot(), DownStore(clock), clock).token_for(ADA)
+
+
+async def test_a_cancelled_key_fetch_still_closes_the_session_it_opened(store, clock):
+    # A client that gives up mid-fetch must not leave a Chatwoot login session behind.
+    import asyncio
+
+    chatwoot = FakeSsoChatwoot()
+    chatwoot.add("ada@example.com")
+    signed_in = asyncio.Event()
+
+    class SlowProfile(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            if request.url.path == "/api/v1/profile":
+                signed_in.set()
+                await asyncio.sleep(10)
+            return await chatwoot.handle_async_request(request)
+
+    task = asyncio.create_task(minter_for(SlowProfile(), store, clock).token_for(ADA))
+    await signed_in.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert [r.method for r in chatwoot.requests if r.url.path == "/auth/sign_out"] == ["DELETE"]

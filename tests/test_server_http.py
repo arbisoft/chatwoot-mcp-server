@@ -1,5 +1,6 @@
 import dataclasses
 
+import httpx
 import pytest
 from starlette.testclient import TestClient
 
@@ -176,3 +177,44 @@ async def test_an_id_sent_as_a_huge_numeric_string_is_still_refused(settings, fa
         result = await client.call_tool("get_conversation", {"conversation_id": "99999999999"}, raise_on_error=False)
     assert result.is_error and "less_than_equal" in result.content[0].text
     assert [r for r in fake.requests if "/conversations" in r.url.path] == []
+
+
+async def test_a_failed_tool_is_an_mcp_error_with_the_same_text_and_one_log_line(settings, fake, caplog):
+    import logging
+
+    from fastmcp import Client
+
+    fake.on("GET", "/conversations/12", status=404, json={"error": "missing"})
+    fake.on("GET", "/conversations/13", json={"id": 13})
+    with caplog.at_level(logging.WARNING, logger="chatwoot_mcp.server"):
+        async with Client(build_server(settings, transport=fake)) as client:
+            failed = await client.call_tool("get_conversation", {"conversation_id": 12}, raise_on_error=False)
+            worked = await client.call_tool("get_conversation", {"conversation_id": 13}, raise_on_error=False)
+    assert failed.is_error and failed.content[0].text.startswith("Error: not found (HTTP 404)")
+    assert not worked.is_error
+    lines = [r.getMessage() for r in caplog.records if r.name == "chatwoot_mcp.server"]
+    # The tool and the error are logged; the arguments never are.
+    assert len(lines) == 1 and lines[0].startswith("tool get_conversation failed: Error: not found (HTTP 404)")
+
+
+async def test_a_slow_read_is_stopped_at_the_deadline_but_a_write_is_not(settings, fake):
+    import asyncio
+    import dataclasses
+
+    from fastmcp import Client
+
+    async def slow(_request):
+        await asyncio.sleep(0.3)
+        return httpx.Response(200, json={"id": 12, "payload": {"current_status": "pending"}})
+
+    fake.on("GET", "/conversations/12", handler=slow)
+    fake.on("POST", "/conversations/12/toggle_status", handler=slow)
+    quick = dataclasses.replace(settings, tool_timeout_seconds=0.1)
+    async with Client(build_server(quick, transport=fake)) as client:
+        read = await client.call_tool("get_conversation", {"conversation_id": 12}, raise_on_error=False)
+        write = await client.call_tool(
+            "set_conversation_status", {"conversation_id": 12, "status": "pending"}, raise_on_error=False
+        )
+    assert read.is_error and "did not answer within 0.1 seconds" in read.content[0].text
+    # A write cut short would have an unknown outcome, so it is never stopped by the deadline.
+    assert not write.is_error and write.data["status"] == "pending"

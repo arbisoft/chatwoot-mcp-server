@@ -2,7 +2,6 @@ import dataclasses
 import json
 
 import pytest
-from fastmcp.exceptions import ToolError
 
 from chatwoot_mcp.tools.read.reports import day_range
 from tests.conftest import REPORTS, FakeChatwoot, data, profile, unframed
@@ -193,8 +192,8 @@ async def test_csat_refuses_agents_and_bad_scores(settings, fake):
     assert "your account is an agent" in await data(
         settings, fake, "list_csat_responses", {"since": "2026-10-01", "until": "2026-10-02"}
     )
-    with pytest.raises(ToolError, match="less than or equal to 5"):
-        await data(
-            settings, fake, "list_csat_responses", {"since": "2026-10-01", "until": "2026-10-02", "ratings": [6]}
-        )
+    refused = await data(
+        settings, fake, "list_csat_responses", {"since": "2026-10-01", "until": "2026-10-02", "ratings": [6]}
+    )
+    assert "less than or equal to 5" in refused
     assert fake.calls("GET", "/csat_survey_responses") == []

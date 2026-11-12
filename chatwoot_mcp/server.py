@@ -29,6 +29,9 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.middleware import Middleware
+from fastmcp.server.providers.local_provider import LocalProvider
+from fastmcp.tools.base import ToolResult
+from mcp.types import TextContent
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -36,6 +39,7 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from chatwoot_mcp.client import ChatwootClient
+from chatwoot_mcp.client.http import RetryPolicy
 from chatwoot_mcp.config import Settings
 from chatwoot_mcp.confirmations import ConfirmationBackend, Confirmations, MemoryConfirmationBackend
 from chatwoot_mcp.credentials import (
@@ -85,6 +89,7 @@ def build_server(
         timeout_seconds=settings.timeout_seconds,
         connect_timeout_seconds=settings.connect_timeout_seconds,
         transport=transport,
+        retry=RetryPolicy(max_retries=settings.max_retries),
     )
     static = StaticCredentialProvider(client, settings.http_token, settings.account_id)
     credentials = credentials or MountRoutedCredentialProvider(
@@ -113,6 +118,7 @@ def build_server(
     # An exception no tool turned into an "Error: ..." string is logged here and reaches the client only as a generic
     # message, so internal hosts or stack details never reach the model. ToolError messages still pass.
     mcp = FastMCP(SERVER_NAME, instructions=INSTRUCTIONS, lifespan=lifespan, auth=auth, mask_error_details=True)
+    mcp.add_middleware(ToolOutcome(mcp.local_provider, settings.tool_timeout_seconds))
     mcp.add_middleware(ArgumentBoundary())
     register_tools(mcp, context, settings)
     return mcp
@@ -144,6 +150,45 @@ class ArgumentBoundary(Middleware):
             if problem:
                 raise ToolError(f"Error: {problem}; nothing was sent to Chatwoot")
         return await call_next(context)
+
+
+def error_text(result: ToolResult) -> str | None:
+    """The text of a tool result that is one ``Error: ...`` message, else ``None``."""
+    if len(result.content) != 1 or not isinstance(result.content[0], TextContent):
+        return None
+    text = result.content[0].text
+    return text if text.startswith("Error:") else None
+
+
+class ToolOutcome(Middleware):
+    """Report each tool's ``Error: ...`` result as an MCP error (``isError``), log it, and bound read-only tools.
+
+    Tools return their failures as plain ``Error: ...`` text so the model can read why; this marks them so clients and
+    logs see a failure too, without changing the text. The log line carries the tool name and that text (already
+    free of keys and capped), never the arguments, which can hold customer text. A read-only tool still running after
+    ``deadline_seconds`` is stopped and reported as too slow; writes are never cut short, since a write stopped
+    mid-request has an unknown outcome.
+    """
+
+    def __init__(self, tools: LocalProvider, deadline_seconds: float) -> None:
+        self._tools = tools
+        self._deadline = deadline_seconds
+
+    async def on_call_tool(self, context, call_next):
+        name = context.message.name
+        tool = await self._tools.get_tool(name)
+        read_only = bool(tool and tool.annotations and tool.annotations.readOnlyHint)
+        try:
+            async with asyncio.timeout(self._deadline if read_only else None):
+                result = await call_next(context)
+        except TimeoutError:
+            text = f"Error: Chatwoot did not answer within {self._deadline:g} seconds; try again"
+            result = ToolResult(content=[TextContent(type="text", text=text)])
+        text = error_text(result)
+        if text is None:
+            return result
+        logger.warning("tool %s failed: %s", name, text[:300])
+        return result.model_copy(update={"is_error": True})
 
 
 class BodyLimit:
