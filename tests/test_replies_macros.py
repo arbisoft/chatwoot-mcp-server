@@ -1,0 +1,291 @@
+import httpx
+import pytest
+from fastmcp import Client
+from fastmcp.client.elicitation import ElicitResult
+
+from chatwoot_mcp.client.errors import ChatwootTransportError, ServerError, UnexpectedResponseError
+from chatwoot_mcp.server import build_server
+from chatwoot_mcp.tools.context import send_failure
+from tests.conftest import FakeChatwoot, outcome, unframed
+
+CHAT = {"id": 12, "can_reply": True, "meta": {"channel": "Channel::Email", "sender": {"id": 4, "name": "Sam"}}}
+REPLY = {"conversation_id": 12, "content": "Hi Sam"}
+
+
+async def two_steps(settings, fake, prepare, confirm, arguments, *, change=None):
+    """Prepare, then confirm in the same server, as an assistant would; returns (preview, result, reuse)."""
+    async with Client(build_server(settings, transport=fake)) as client:
+        first = await outcome(client, prepare, arguments)
+        if not isinstance(first, dict):
+            return first, None, None
+        token = first["confirmation_token"]
+        done = await outcome(client, confirm, {**arguments, **(change or {}), "confirmation_token": token})
+        again = await outcome(client, confirm, {**arguments, "confirmation_token": token})
+    return first, done, again
+
+
+def reply_routes(fake: FakeChatwoot, **chat):
+    fake.on("GET", "/conversations/12", json={**CHAT, **chat})
+    fake.on(
+        "POST", "/conversations/12/messages", json={"id": 70, "content": "Hi Sam", "message_type": 1, "private": False}
+    )
+
+
+async def test_a_reply_is_previewed_then_sent_once(everything, fake):
+    reply_routes(fake)
+    preview, sent, reuse = await two_steps(everything, fake, "prepare_send_reply", "send_reply", REPLY)
+    assert unframed(preview["preview"]["to"]) == {"id": 4, "name": "Sam"}
+    assert "cannot be unsent" in preview["preview"]["warning"] and "send_reply" in preview["next_step"]
+    assert fake.last_json("POST", "/conversations/12/messages") == {
+        "content": "Hi Sam",
+        "message_type": "outgoing",
+        "private": False,
+    }
+    assert sent["id"] == 70 and sent["url"].endswith("/conversations/12")
+    assert "already used" in reuse and len(fake.calls("POST", "/conversations/12/messages")) == 1
+
+
+async def test_preparing_changes_nothing(everything, fake):
+    reply_routes(fake)
+    async with Client(build_server(everything, transport=fake)) as client:
+        await client.call_tool("prepare_send_reply", REPLY)
+    assert fake.writes() == []
+
+
+async def test_a_changed_message_is_refused(everything, fake):
+    reply_routes(fake)
+    _, sent, _ = await two_steps(
+        everything, fake, "prepare_send_reply", "send_reply", REPLY, change={"content": "Other"}
+    )
+    assert "does not match" in sent and fake.writes() == []
+
+
+async def test_a_chat_that_cannot_be_replied_to_gets_no_token(everything, fake):
+    reply_routes(fake, can_reply=False)
+    preview, _, _ = await two_steps(everything, fake, "prepare_send_reply", "send_reply", REPLY)
+    assert "cannot be replied to" in preview
+
+
+async def test_a_reply_chatwoot_marked_private_is_reported(everything, fake):
+    reply_routes(fake)
+    fake.on("POST", "/conversations/12/messages", json={"id": 70, "content": "x", "private": True})
+    _, sent, _ = await two_steps(everything, fake, "prepare_send_reply", "send_reply", REPLY)
+    assert "marked the message private" in sent
+
+
+def test_a_failed_send_says_whether_it_went():
+    request = httpx.Request("POST", "https://chat.test")
+    unsent = ChatwootTransportError("x")
+    unsent.__cause__ = httpx.ConnectError("refused", request=request)
+    maybe = ChatwootTransportError("x")
+    maybe.__cause__ = httpx.ReadTimeout("slow", request=request)
+    assert "nothing was sent" in send_failure(unsent, "reply")
+    assert "may or may not" in send_failure(maybe, "reply")
+    assert "may or may not" in send_failure(ServerError(502, "bad gateway"), "reply")
+    from chatwoot_mcp.client.errors import ChatwootAPIError
+
+    assert "so it was sent" in send_failure(ChatwootAPIError(200, "response was not JSON"), "reply")
+    assert "so it was sent" in send_failure(UnexpectedResponseError("unexpected Message shape"), "reply")
+
+
+SAM_IN_API_INBOX = {"payload": {"id": 4, "name": "Sam", "contact_inboxes": [{"source_id": "s-1", "inbox": {"id": 8}}]}}
+
+
+async def test_a_new_conversation_is_previewed_then_created_in_the_customers_session(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "name": "API", "channel_type": "Channel::Api"})
+    fake.on("POST", "/conversations", json={"id": 22, "status": "open", "inbox_id": 8, "can_reply": True})
+    arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hello"}
+    preview, created, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", arguments
+    )
+    assert preview["preview"]["inbox"]["name"] == "API" and "warning" in preview["preview"]
+    assert fake.last_json("POST", "/conversations") == {
+        "contact_id": 4,
+        "inbox_id": 8,
+        "message": {"content": "Hello"},
+        "source_id": "s-1",
+    }
+    assert created["conversation_id"] == 22 and created["url"].endswith("/conversations/22")
+
+
+async def test_a_new_conversation_in_an_inbox_chatwoot_cannot_use_gets_no_token(everything, fake):
+    fake.on("GET", "/contacts/4", json={"payload": {"id": 4, "name": "Sam"}})
+    arguments = {"contact_id": 4, "inbox_id": 8}
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::FacebookPage"})
+    unsupported, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", arguments
+    )
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Email"})
+    no_email, _, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::WebWidget"})
+    no_session, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", arguments
+    )
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Whatsapp"})
+    whatsapp, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {**arguments, "message": "Hi"}
+    )
+    assert "cannot start a chat" in unsupported and "contact's email" in no_email
+    assert "never written in through this inbox" in no_session and "WhatsApp" in whatsapp and fake.writes() == []
+
+
+async def test_a_first_message_the_channel_cannot_deliver_is_reported(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api"})
+    fake.on("POST", "/conversations", json={"id": 22, "status": "open", "can_reply": False})
+    arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hello"}
+    _, created, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    assert "chat 22 was created" in created and "not delivered" in created
+
+
+async def test_replies_do_not_exist_unless_switched_on_or_when_read_only(settings, read_only, fake):
+    for setup in (settings, read_only):
+        async with Client(build_server(setup, transport=fake)) as client:
+            names = {tool.name for tool in await client.list_tools()}
+        assert not names & {"prepare_send_reply", "send_reply", "prepare_run_macro", "run_macro"}
+
+
+# --- macros ---------------------------------------------------------------------------------------
+
+
+def macro_routes(fake, actions):
+    fake.on("GET", "/conversations/12", json=CHAT)
+    fake.on("GET", "/macros/7", json={"payload": {"id": 7, "name": "Refund", "actions": actions}})
+    fake.on(
+        "GET", "/macros", json={"payload": [{"id": 7, "name": "Refund", "visibility": "global", "actions": actions}]}
+    )
+    fake.on("POST", "/macros/7/execute", json={})
+
+
+async def test_a_macro_preview_lists_every_step_and_warns_about_ones_that_reach_outside(everything, fake):
+    macro_routes(
+        fake,
+        [
+            {"action_name": "add_label", "action_params": ["refund"]},
+            {"action_name": "send_message", "action_params": ["We are on it"]},
+            {"action_name": "send_webhook_event", "action_params": ["https://hooks.test"]},
+        ],
+    )
+    arguments = {"macro_id": 7, "conversation_id": 12}
+    preview, done, _ = await two_steps(everything, fake, "prepare_run_macro", "run_macro", arguments)
+    p = preview["preview"]
+    assert p["macro"] == "Refund" and p["steps"][1] == {"step": "send_message", "with": ["We are on it"]}
+    assert "sends a message to the customer" in p["warning"] and "outside web address" in p["warning"]
+    assert fake.last_json("POST", "/macros/7/execute") == {"conversation_ids": [12]}
+    assert done["status"] == "started" and "background" in done["note"]
+
+
+async def test_a_macro_that_resolves_warns_about_the_satisfaction_survey(everything, fake):
+    macro_routes(fake, [{"action_name": "resolve_conversation", "action_params": None}])
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
+    )
+    assert "satisfaction survey" in preview["preview"]["warning"]
+
+
+async def test_a_macro_that_stays_inside_has_no_warning_and_is_listed(everything, fake):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["refund"]}])
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
+    )
+    assert "warning" not in preview["preview"]
+    async with Client(build_server(everything, transport=fake)) as client:
+        listed = await outcome(client, "list_macros", {})
+    assert listed == {
+        "page": 1,
+        "macros": [
+            {"id": 7, "name": "Refund", "visibility": "global", "steps": [{"step": "add_label", "with": ["refund"]}]}
+        ],
+    }
+
+
+async def test_a_full_confirmation_store_fails_closed(everything, fake, monkeypatch):
+    reply_routes(fake)
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("valkey down")
+
+    monkeypatch.setattr("chatwoot_mcp.confirmations.Confirmations.issue", broken)
+    preview, _, _ = await two_steps(everything, fake, "prepare_send_reply", "send_reply", REPLY)
+    assert "confirmation store is unavailable" in preview and fake.writes() == []
+
+
+async def test_a_macro_edited_after_the_preview_is_refused(everything, fake):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["refund"]}])
+    versions = [[{"action_name": "add_label", "action_params": ["refund"]}]]
+    edited = [{"action_name": "send_message", "action_params": ["Hi"]}]
+
+    def macro(_request):
+        # The preview reads the first version; every later read sees the edit.
+        actions = versions.pop() if versions else edited
+        return httpx.Response(200, json={"payload": {"id": 7, "name": "Refund", "actions": actions}})
+
+    fake.on("GET", "/macros/7", handler=macro)
+    arguments = {"macro_id": 7, "conversation_id": 12}
+    _, done, _ = await two_steps(everything, fake, "prepare_run_macro", "run_macro", arguments)
+    assert "steps no longer match" in done and fake.writes() == []
+
+
+@pytest.mark.parametrize("step", ["mute_conversation", "change_status", "some_future_action"])
+async def test_a_step_not_known_to_stay_inside_gets_a_warning(everything, fake, step):
+    macro_routes(fake, [{"action_name": "add_label", "action_params": ["billing"]}, {"action_name": step}])
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_run_macro", "run_macro", {"macro_id": 7, "conversation_id": 12}
+    )
+    assert "cannot be undone" in preview["preview"]["warning"]
+
+
+async def test_a_twilio_whatsapp_first_message_gets_no_token(everything, fake):
+    fake.on("GET", "/contacts/4", json={"payload": {"id": 4, "phone_number": "+15550100"}})
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::TwilioSms", "medium": "whatsapp"})
+    arguments = {"contact_id": 4, "inbox_id": 8, "message": "Hi"}
+    preview, _, _ = await two_steps(everything, fake, "prepare_create_conversation", "create_conversation", arguments)
+    assert "WhatsApp" in preview and fake.writes() == []
+
+
+async def test_an_inbox_with_one_chat_per_customer_points_to_the_existing_chat(everything, fake):
+    # Chatwoot's ConversationBuilder would reuse conversations.last instead of starting the promised new chat.
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api", "lock_to_single_conversation": True})
+    fake.on(
+        "GET", "/contacts/4/conversations", json={"payload": [{"id": 31, "inbox_id": 8}, {"id": 30, "inbox_id": 2}]}
+    )
+    preview, _, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {"contact_id": 4, "inbox_id": 8}
+    )
+    assert "reuse chat 31" in preview and fake.writes() == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "sent"),
+    [("approve", True), ("cancel", False), (ElicitResult(action="decline"), False), (RuntimeError("closed"), False)],
+    ids=["approved", "cancelled", "declined", "prompt-failed"],
+)
+async def test_a_client_that_can_prompt_asks_the_person_before_anything_is_sent(everything, fake, answer, sent):
+    # The model holds the token, so where the client can show a prompt the person approves, not the model.
+    reply_routes(fake)
+    prompts = []
+
+    async def handler(message, response_type, params, context):
+        prompts.append(message)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer if isinstance(answer, ElicitResult) else {"value": answer}
+
+    async with Client(build_server(everything, transport=fake), elicitation_handler=handler) as client:
+        token = (await outcome(client, "prepare_send_reply", REPLY))["confirmation_token"]
+        done = await outcome(client, "send_reply", {**REPLY, "confirmation_token": token})
+    assert len(prompts) == 1 and "send reply" in prompts[0] and "Hi Sam" in prompts[0]
+    assert bool(fake.calls("POST", "/conversations/12/messages")) is sent
+    assert (done.get("id") == 70) if sent else ("did not approve" in done)
+
+
+async def test_a_created_chat_whose_answer_cannot_be_read_says_it_was_created(everything, fake):
+    fake.on("GET", "/contacts/4", json=SAM_IN_API_INBOX)
+    fake.on("GET", "/inboxes/8", json={"id": 8, "channel_type": "Channel::Api"})
+    fake.on("POST", "/conversations", json={"status": "open"})
+    _, created, _ = await two_steps(
+        everything, fake, "prepare_create_conversation", "create_conversation", {"contact_id": 4, "inbox_id": 8}
+    )
+    assert "so it was created, but its answer could not be read" in created

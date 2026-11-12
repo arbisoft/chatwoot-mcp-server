@@ -1,0 +1,198 @@
+"""Runtime settings, read once from the environment.
+
+``Settings.from_env`` is pure over the mapping it is given, so tests pass a
+dict instead of patching ``os.environ``. Every value is checked here, so a typo
+stops the server at start-up instead of surfacing later inside a tool call.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+DEFAULT_HTTP_HOST = "127.0.0.1"
+LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+DEFAULT_HTTP_PORT = 8215
+DEFAULT_CONFIRM_TTL_SECONDS = 600
+DEFAULT_MAX_ITEMS = 25
+DEFAULT_MAX_TEXT_CHARS = 2000
+TOOL_MODULES = (
+    "reference",
+    "conversations",
+    "messages",
+    "contacts",
+    "labels",
+    "help_center",
+    "reports",
+    "replies",
+    "macros",
+)
+# Both reach the customer (or run many steps at once), so they are opt-in, like Zammad's email and macros.
+DEFAULT_OFF_MODULES = frozenset({"replies", "macros"})
+DEFAULT_ENABLED_MODULES = frozenset(TOOL_MODULES) - DEFAULT_OFF_MODULES
+DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
+DEFAULT_MAX_RETRIES = 2
+MAX_RETRIES_LIMIT = 5
+# A read-only tool still running after this is reported as too slow, before the MCP client gives up on it.
+DEFAULT_TOOL_TIMEOUT_SECONDS = 60.0
+URL_PATTERN = re.compile(r"https?://[^\s/]+(/\S*)?")
+
+
+class ConfigError(ValueError):
+    """Raised when a required setting is missing or malformed."""
+
+
+# Every boolean gate is read through parse_flag, so they all agree. Values are stripped (a trailing space is routine
+# in Docker .env files), and anything else stops the server: a typo must never silently turn CHATWOOT_READ_ONLY off.
+_TRUTHY = frozenset({"true", "1", "yes", "on"})
+_FALSY = frozenset({"false", "0", "no", "off"})
+
+
+def parse_flag(raw: str | None, default: bool = False) -> bool:
+    """true/1/yes/on or false/0/no/off, any case; ``default`` when unset or blank; ``ConfigError`` otherwise."""
+    value = (raw or "").strip().lower()
+    if not value:
+        return default
+    if value not in _TRUTHY | _FALSY:
+        raise ConfigError(f"{raw!r} is not a true/false value (use true or false)")
+    return value in _TRUTHY
+
+
+def env_flag(name: str, default: bool = False, environ: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    try:
+        return parse_flag(env.get(name), default)
+    except ConfigError as error:
+        raise ConfigError(f"{name}: {error}") from None
+
+
+@dataclass(frozen=True)
+class Settings:
+    chatwoot_url: str
+    account_id: int
+    http_token: str | None = None
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    http_host: str = DEFAULT_HTTP_HOST
+    http_port: int = DEFAULT_HTTP_PORT
+    public_url: str = ""
+    read_only: bool = False
+    filter_tools_by_role: bool = False
+    confirm_ttl_seconds: int = DEFAULT_CONFIRM_TTL_SECONDS
+    max_items: int = DEFAULT_MAX_ITEMS
+    max_text_chars: int = DEFAULT_MAX_TEXT_CHARS
+    enabled_modules: frozenset[str] = DEFAULT_ENABLED_MODULES
+    http_shared_token_route: bool = False
+    max_retries: int = DEFAULT_MAX_RETRIES
+    tool_timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
+
+    @property
+    def browser_url(self) -> str:
+        return self.public_url or self.chatwoot_url
+
+    def module_enabled(self, module: str) -> bool:
+        return module in self.enabled_modules
+
+    def check_http(self) -> None:
+        """Refuse an HTTP setup that would hand ``CHATWOOT_HTTP_TOKEN`` to anyone who can reach ``/mcp``."""
+        if self.http_token and not self.http_shared_token_route:
+            raise ConfigError(
+                "CHATWOOT_HTTP_TOKEN is set in http mode: /mcp would act as that key's owner for anyone who can "
+                "reach it. Unset it and have each user send X-Chatwoot-Token to /http/api-key/mcp, or set "
+                "CHATWOOT_HTTP_SHARED_TOKEN_ROUTE=true to accept that"
+            )
+        if self.http_shared_token_route and not self.http_token:
+            raise ConfigError("CHATWOOT_HTTP_SHARED_TOKEN_ROUTE=true needs CHATWOOT_HTTP_TOKEN")
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
+        env = os.environ if environ is None else environ
+        chatwoot_url = read_setting(env, "CHATWOOT_URL").rstrip("/")
+        if not URL_PATTERN.fullmatch(chatwoot_url):
+            raise ConfigError(f"CHATWOOT_URL must be an http:// or https:// address, got {chatwoot_url!r}")
+        public_url = read_setting(env, "CHATWOOT_PUBLIC_URL").rstrip("/")
+        if public_url and not URL_PATTERN.fullmatch(public_url):
+            raise ConfigError(f"CHATWOOT_PUBLIC_URL must be an http:// or https:// address, got {public_url!r}")
+        return cls(
+            chatwoot_url=chatwoot_url,
+            account_id=_required_int(env, "CHATWOOT_ACCOUNT_ID"),
+            http_token=read_setting(env, "CHATWOOT_HTTP_TOKEN") or None,
+            timeout_seconds=_positive_float(env, "CHATWOOT_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
+            connect_timeout_seconds=_positive_float(
+                env, "CHATWOOT_CONNECT_TIMEOUT_SECONDS", DEFAULT_CONNECT_TIMEOUT_SECONDS
+            ),
+            http_host=read_setting(env, "MCP_HTTP_HOST") or DEFAULT_HTTP_HOST,
+            http_port=_port(env, "MCP_HTTP_PORT", DEFAULT_HTTP_PORT),
+            public_url=public_url,
+            read_only=env_flag("CHATWOOT_READ_ONLY", environ=env),
+            filter_tools_by_role=env_flag("CHATWOOT_FILTER_TOOLS_BY_ROLE", environ=env),
+            confirm_ttl_seconds=positive_int_setting(env, "CHATWOOT_CONFIRM_TTL_SECONDS", DEFAULT_CONFIRM_TTL_SECONDS),
+            max_items=positive_int_setting(env, "CHATWOOT_MAX_ITEMS", DEFAULT_MAX_ITEMS),
+            max_text_chars=positive_int_setting(env, "CHATWOOT_MAX_TEXT_CHARS", DEFAULT_MAX_TEXT_CHARS),
+            enabled_modules=frozenset(
+                module
+                for module in TOOL_MODULES
+                if env_flag(module_flag(module), default=module in DEFAULT_ENABLED_MODULES, environ=env)
+            ),
+            http_shared_token_route=env_flag("CHATWOOT_HTTP_SHARED_TOKEN_ROUTE", environ=env),
+            max_retries=_retries(env),
+            tool_timeout_seconds=_positive_float(env, "CHATWOOT_TOOL_TIMEOUT_SECONDS", DEFAULT_TOOL_TIMEOUT_SECONDS),
+        )
+
+
+def module_flag(module: str) -> str:
+    return f"CHATWOOT_ENABLE_{module.upper()}"
+
+
+def read_setting(env: Mapping[str, str], name: str) -> str:
+    return env.get(name, "").strip()
+
+
+def _positive_float(env: Mapping[str, str], name: str, default: float) -> float:
+    raw = read_setting(env, name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name}={raw!r} is not a number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ConfigError(f"{name} must be a finite number greater than zero")
+    return value
+
+
+def _retries(env: Mapping[str, str]) -> int:
+    raw = read_setting(env, "CHATWOOT_MAX_RETRIES")
+    if not raw:
+        return DEFAULT_MAX_RETRIES
+    if not (raw.isascii() and raw.isdigit()) or int(raw) > MAX_RETRIES_LIMIT:
+        raise ConfigError(f"CHATWOOT_MAX_RETRIES={raw!r} must be a whole number from 0 to {MAX_RETRIES_LIMIT}")
+    return int(raw)
+
+
+def positive_int_setting(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = read_setting(env, name)
+    if not raw:
+        return default
+    if not (raw.isascii() and raw.isdigit()) or int(raw) < 1:
+        raise ConfigError(f"{name}={raw!r} must be a whole number of at least 1")
+    return int(raw)
+
+
+def _required_int(env: Mapping[str, str], name: str) -> int:
+    if not read_setting(env, name):
+        raise ConfigError(f"{name} is required")
+    return positive_int_setting(env, name, 0)
+
+
+def _port(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = read_setting(env, name)
+    if not raw:
+        return default
+    if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= 65535:
+        raise ConfigError(f"{name}={raw!r} is not a valid TCP port")
+    return int(raw)
